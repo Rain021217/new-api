@@ -45,6 +45,8 @@ import { useUpdateOption } from '../hooks/use-update-option'
 const basicAuthSchema = z.object({
   PasswordLoginEnabled: z.boolean(),
   PasswordRegisterEnabled: z.boolean(),
+  SMSLoginEnabled: z.boolean(),
+  SMSRegisterEnabled: z.boolean(),
   EmailVerificationEnabled: z.boolean(),
   RegisterEnabled: z.boolean(),
   EmailDomainRestrictionEnabled: z.boolean(),
@@ -135,6 +137,27 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
 
           <FormField
             control={form.control}
+            name='SMSLoginEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Phone Number Login')}</FormLabel>
+                  <FormDescription>
+                    {t('Allow users to log in with phone number')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
             name='RegisterEnabled'
             render={({ field }) => (
               <SettingsSwitchItem>
@@ -163,6 +186,27 @@ export function BasicAuthSection({ defaultValues }: BasicAuthSectionProps) {
                   <FormLabel>{t('Password Registration')}</FormLabel>
                   <FormDescription>
                     {t('Allow registration with password')}
+                  </FormDescription>
+                </SettingsSwitchContent>
+                <FormControl>
+                  <Switch
+                    checked={field.value}
+                    onCheckedChange={field.onChange}
+                  />
+                </FormControl>
+              </SettingsSwitchItem>
+            )}
+          />
+
+          <FormField
+            control={form.control}
+            name='SMSRegisterEnabled'
+            render={({ field }) => (
+              <SettingsSwitchItem>
+                <SettingsSwitchContent>
+                  <FormLabel>{t('Phone Number Registration')}</FormLabel>
+                  <FormDescription>
+                    {t('Allow registration with phone number')}
                   </FormDescription>
                 </SettingsSwitchContent>
                 <FormControl>

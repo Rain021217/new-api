@@ -33,6 +33,14 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
@@ -81,6 +89,12 @@ const oauthSchema = z.object({
   WeChatServerAddress: z.string(),
   WeChatServerToken: z.string(),
   WeChatAccountQRCodeImageURL: z.string(),
+  WeChatCodeLoginEnabled: z.boolean(),
+  WeChatScanLoginEnabled: z.boolean(),
+  WeChatDefaultLoginMethod: z.enum(['scan', 'code']),
+  WeChatScanLoginPollIntervalSeconds: z.number().int().min(1),
+  WeChatScanLoginTimeoutSeconds: z.number().int().min(1),
+  WeChatScanLoginCreateIntervalSecondsPerIP: z.number().int().min(0),
 })
 
 type OAuthFormValues = z.infer<typeof oauthSchema>
@@ -110,6 +124,12 @@ type FlatOAuthDefaults = {
   WeChatServerAddress: string
   WeChatServerToken: string
   WeChatAccountQRCodeImageURL: string
+  WeChatCodeLoginEnabled: boolean
+  WeChatScanLoginEnabled: boolean
+  WeChatDefaultLoginMethod: 'scan' | 'code'
+  WeChatScanLoginPollIntervalSeconds: number
+  WeChatScanLoginTimeoutSeconds: number
+  WeChatScanLoginCreateIntervalSecondsPerIP: number
 }
 
 const oauthTabContentClassName =
@@ -144,6 +164,14 @@ const buildFormDefaults = (defaults: FlatOAuthDefaults): OAuthFormValues => ({
   WeChatServerAddress: defaults.WeChatServerAddress ?? '',
   WeChatServerToken: defaults.WeChatServerToken ?? '',
   WeChatAccountQRCodeImageURL: defaults.WeChatAccountQRCodeImageURL ?? '',
+  WeChatCodeLoginEnabled: defaults.WeChatCodeLoginEnabled,
+  WeChatScanLoginEnabled: defaults.WeChatScanLoginEnabled,
+  WeChatDefaultLoginMethod: defaults.WeChatDefaultLoginMethod,
+  WeChatScanLoginPollIntervalSeconds:
+    defaults.WeChatScanLoginPollIntervalSeconds,
+  WeChatScanLoginTimeoutSeconds: defaults.WeChatScanLoginTimeoutSeconds,
+  WeChatScanLoginCreateIntervalSecondsPerIP:
+    defaults.WeChatScanLoginCreateIntervalSecondsPerIP,
 })
 
 const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
@@ -171,6 +199,13 @@ const normalizeFormValues = (values: OAuthFormValues): FlatOAuthDefaults => ({
   WeChatServerAddress: values.WeChatServerAddress,
   WeChatServerToken: values.WeChatServerToken,
   WeChatAccountQRCodeImageURL: values.WeChatAccountQRCodeImageURL,
+  WeChatCodeLoginEnabled: values.WeChatCodeLoginEnabled,
+  WeChatScanLoginEnabled: values.WeChatScanLoginEnabled,
+  WeChatDefaultLoginMethod: values.WeChatDefaultLoginMethod,
+  WeChatScanLoginPollIntervalSeconds: values.WeChatScanLoginPollIntervalSeconds,
+  WeChatScanLoginTimeoutSeconds: values.WeChatScanLoginTimeoutSeconds,
+  WeChatScanLoginCreateIntervalSecondsPerIP:
+    values.WeChatScanLoginCreateIntervalSecondsPerIP,
 })
 
 type OAuthSectionProps = {
@@ -886,6 +921,177 @@ export function OAuthSection(props: OAuthSectionProps) {
                           name={field.name}
                           onBlur={field.onBlur}
                           ref={field.ref}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatCodeLoginEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>
+                          {t('Enable WeChat Code Login')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Allow the legacy verification-code flow (follow the official account, reply with a code)'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatScanLoginEnabled'
+                  render={({ field }) => (
+                    <SettingsSwitchItem>
+                      <SettingsSwitchContent>
+                        <FormLabel>
+                          {t('Enable WeChat Scan Login')}
+                        </FormLabel>
+                        <FormDescription>
+                          {t(
+                            'Allow the server-mediated QR scan flow (scene_id / login_token)'
+                          )}
+                        </FormDescription>
+                      </SettingsSwitchContent>
+                      <FormControl>
+                        <Switch
+                          checked={field.value}
+                          onCheckedChange={field.onChange}
+                        />
+                      </FormControl>
+                    </SettingsSwitchItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatDefaultLoginMethod'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Default Login Method')}</FormLabel>
+                      <FormControl>
+                        <Select
+                          items={[
+                            { value: 'scan', label: t('Scan') },
+                            { value: 'code', label: t('Code') },
+                          ]}
+                          value={field.value}
+                          onValueChange={(value) =>
+                            field.onChange(value as 'scan' | 'code')
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder={t('Select method')} />
+                          </SelectTrigger>
+                          <SelectContent alignItemWithTrigger={false}>
+                            <SelectGroup>
+                              <SelectItem value='scan'>{t('Scan')}</SelectItem>
+                              <SelectItem value='code'>{t('Code')}</SelectItem>
+                            </SelectGroup>
+                          </SelectContent>
+                        </Select>
+                      </FormControl>
+                      <FormDescription>
+                        {t(
+                          'Which method is presented first when both flows are enabled'
+                        )}
+                      </FormDescription>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatScanLoginPollIntervalSeconds'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('Poll interval (seconds)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          autoComplete='off'
+                          type='number'
+                          min={1}
+                          {...field}
+                          value={field.value ?? 0}
+                          onChange={(event) =>
+                            field.onChange(
+                              event.target.value === ''
+                                ? 1
+                                : event.target.valueAsNumber
+                            )
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatScanLoginTimeoutSeconds'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>{t('QR timeout (seconds)')}</FormLabel>
+                      <FormControl>
+                        <Input
+                          autoComplete='off'
+                          type='number'
+                          min={1}
+                          {...field}
+                          value={field.value ?? 0}
+                          onChange={(event) =>
+                            field.onChange(
+                              event.target.value === ''
+                                ? 1
+                                : event.target.valueAsNumber
+                            )
+                          }
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <FormField
+                  control={form.control}
+                  name='WeChatScanLoginCreateIntervalSecondsPerIP'
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>
+                        {t('Per-IP create interval (seconds)')}
+                      </FormLabel>
+                      <FormControl>
+                        <Input
+                          autoComplete='off'
+                          type='number'
+                          min={0}
+                          {...field}
+                          value={field.value ?? 0}
+                          onChange={(event) =>
+                            field.onChange(
+                              event.target.value === ''
+                                ? 0
+                                : event.target.valueAsNumber
+                            )
+                          }
                         />
                       </FormControl>
                       <FormMessage />

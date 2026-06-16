@@ -45,6 +45,28 @@ func InitOptionMap() {
 	common.OptionMap["WeChatAuthEnabled"] = strconv.FormatBool(common.WeChatAuthEnabled)
 	common.OptionMap["TurnstileCheckEnabled"] = strconv.FormatBool(common.TurnstileCheckEnabled)
 	common.OptionMap["RegisterEnabled"] = strconv.FormatBool(common.RegisterEnabled)
+	common.OptionMap["SMSEnabled"] = strconv.FormatBool(common.SMSEnabled)
+	common.OptionMap["SMSLoginEnabled"] = strconv.FormatBool(common.SMSLoginEnabled)
+	common.OptionMap["SMSRegisterEnabled"] = strconv.FormatBool(common.SMSRegisterEnabled)
+	common.OptionMap["SMSProvider"] = common.SMSProviderName
+	common.OptionMap["SMSBaoEndpoint"] = common.SMSBaoEndpoint
+	common.OptionMap["SMSBaoQueryEndpoint"] = common.SMSBaoQueryEndpoint
+	common.OptionMap["SMSBaoUsername"] = ""
+	common.OptionMap["SMSBaoCredential"] = ""
+	common.OptionMap["SMSBaoCredentialMode"] = common.SMSBaoCredentialMode
+	common.OptionMap["SMSBaoProductID"] = common.SMSBaoProductID
+	common.OptionMap["SMSCodeValidMinutes"] = strconv.Itoa(common.SMSCodeValidMinutes)
+	common.OptionMap["SMSCodeCooldownSeconds"] = strconv.Itoa(common.SMSCodeCooldownSeconds)
+	common.OptionMap["SMSRateLimitEnabled"] = strconv.FormatBool(common.SMSRateLimitEnabled)
+	common.OptionMap["SMSRateLimitWindowSeconds"] = strconv.Itoa(common.SMSRateLimitWindowSeconds)
+	common.OptionMap["SMSRateLimitPhoneCount"] = strconv.Itoa(common.SMSRateLimitPhoneCount)
+	common.OptionMap["SMSRateLimitIPCount"] = strconv.Itoa(common.SMSRateLimitIPCount)
+	common.OptionMap["SMSRateLimitAccountCount"] = strconv.Itoa(common.SMSRateLimitAccountCount)
+	common.OptionMap["SMSRateLimitSceneCount"] = strconv.Itoa(common.SMSRateLimitSceneCount)
+	common.OptionMap["SMSSignature"] = common.SMSSignature
+	common.OptionMap["SMSSignatureReviewStatus"] = common.SMSSignatureReviewStatus
+	common.OptionMap["SMSProductName"] = common.SMSProductName
+	common.OptionMap["SMSTemplate"] = common.SMSTemplate
 	common.OptionMap["AutomaticDisableChannelEnabled"] = strconv.FormatBool(common.AutomaticDisableChannelEnabled)
 	common.OptionMap["AutomaticEnableChannelEnabled"] = strconv.FormatBool(common.AutomaticEnableChannelEnabled)
 	common.OptionMap["LogConsumeEnabled"] = strconv.FormatBool(common.LogConsumeEnabled)
@@ -53,6 +75,7 @@ func InitOptionMap() {
 	common.OptionMap["DrawingEnabled"] = strconv.FormatBool(common.DrawingEnabled)
 	common.OptionMap["TaskEnabled"] = strconv.FormatBool(common.TaskEnabled)
 	common.OptionMap["DataExportEnabled"] = strconv.FormatBool(common.DataExportEnabled)
+	common.OptionMap["AffiliateEnabled"] = strconv.FormatBool(common.AffiliateEnabled)
 	common.OptionMap["ChannelDisableThreshold"] = strconv.FormatFloat(common.ChannelDisableThreshold, 'f', -1, 64)
 	common.OptionMap["EmailDomainRestrictionEnabled"] = strconv.FormatBool(common.EmailDomainRestrictionEnabled)
 	common.OptionMap["EmailAliasRestrictionEnabled"] = strconv.FormatBool(common.EmailAliasRestrictionEnabled)
@@ -126,11 +149,23 @@ func InitOptionMap() {
 	common.OptionMap["WeChatServerAddress"] = ""
 	common.OptionMap["WeChatServerToken"] = ""
 	common.OptionMap["WeChatAccountQRCodeImageURL"] = ""
+	common.OptionMap["WeChatCodeLoginEnabled"] = strconv.FormatBool(common.WeChatCodeLoginEnabled)
+	common.OptionMap["WeChatScanLoginEnabled"] = strconv.FormatBool(common.WeChatScanLoginEnabled)
+	common.OptionMap["WeChatDefaultLoginMethod"] = common.WeChatDefaultLoginMethod
+	common.OptionMap["WeChatScanLoginPollIntervalSeconds"] = strconv.Itoa(common.WeChatScanLoginPollIntervalSeconds)
+	common.OptionMap["WeChatScanLoginTimeoutSeconds"] = strconv.Itoa(common.WeChatScanLoginTimeoutSeconds)
+	common.OptionMap["WeChatScanLoginMinPollIntervalSeconds"] = strconv.Itoa(common.WeChatScanLoginMinPollIntervalSeconds)
+	common.OptionMap["WeChatScanLoginCreateIntervalSecondsPerIP"] = strconv.Itoa(common.WeChatScanLoginCreateIntervalSecondsPerIP)
 	common.OptionMap["TurnstileSiteKey"] = ""
 	common.OptionMap["TurnstileSecretKey"] = ""
 	common.OptionMap["QuotaForNewUser"] = strconv.Itoa(common.QuotaForNewUser)
 	common.OptionMap["QuotaForInviter"] = strconv.Itoa(common.QuotaForInviter)
 	common.OptionMap["QuotaForInvitee"] = strconv.Itoa(common.QuotaForInvitee)
+	common.OptionMap["AffiliateQuotaForInvitee"] = strconv.Itoa(common.AffiliateQuotaForInvitee)
+	common.OptionMap["AffiliateLevelOneQuotaForInvitee"] = strconv.Itoa(common.AffiliateLevelOneQuotaForInvitee)
+	common.OptionMap["AffiliateLevelTwoQuotaForInvitee"] = strconv.Itoa(common.AffiliateLevelTwoQuotaForInvitee)
+	common.OptionMap["AffiliateLevelOneQuotaForInviter"] = strconv.Itoa(common.AffiliateLevelOneQuotaForInviter)
+	common.OptionMap["AffiliateLevelTwoQuotaForInviter"] = strconv.Itoa(common.AffiliateLevelTwoQuotaForInviter)
 	common.OptionMap["QuotaRemindThreshold"] = strconv.Itoa(common.QuotaRemindThreshold)
 	common.OptionMap["PreConsumedQuota"] = strconv.Itoa(common.PreConsumedQuota)
 	common.OptionMap["ModelRequestRateLimitCount"] = strconv.Itoa(setting.ModelRequestRateLimitCount)
@@ -290,12 +325,24 @@ func updateOptionMap(key string, value string) (err error) {
 			common.LinuxDOOAuthEnabled = boolValue
 		case "WeChatAuthEnabled":
 			common.WeChatAuthEnabled = boolValue
+		case "WeChatCodeLoginEnabled":
+			common.WeChatCodeLoginEnabled = boolValue
+		case "WeChatScanLoginEnabled":
+			common.WeChatScanLoginEnabled = boolValue
 		case "TelegramOAuthEnabled":
 			common.TelegramOAuthEnabled = boolValue
 		case "TurnstileCheckEnabled":
 			common.TurnstileCheckEnabled = boolValue
 		case "RegisterEnabled":
 			common.RegisterEnabled = boolValue
+		case "SMSEnabled":
+			common.SMSEnabled = boolValue
+		case "SMSLoginEnabled":
+			common.SMSLoginEnabled = boolValue
+		case "SMSRegisterEnabled":
+			common.SMSRegisterEnabled = boolValue
+		case "SMSRateLimitEnabled":
+			common.SMSRateLimitEnabled = boolValue
 		case "EmailDomainRestrictionEnabled":
 			common.EmailDomainRestrictionEnabled = boolValue
 		case "EmailAliasRestrictionEnabled":
@@ -324,6 +371,8 @@ func updateOptionMap(key string, value string) (err error) {
 			common.TaskEnabled = boolValue
 		case "DataExportEnabled":
 			common.DataExportEnabled = boolValue
+		case "AffiliateEnabled":
+			common.AffiliateEnabled = boolValue
 		case "DefaultCollapseSidebar":
 			common.DefaultCollapseSidebar = boolValue
 		case "MjNotifyEnabled":
@@ -486,6 +535,20 @@ func updateOptionMap(key string, value string) (err error) {
 		common.WeChatServerToken = value
 	case "WeChatAccountQRCodeImageURL":
 		common.WeChatAccountQRCodeImageURL = value
+	case "WeChatDefaultLoginMethod":
+		// Defensive: only accept the two known values; anything else is ignored so the
+		// in-memory default ("scan") is preserved if an admin saves garbage.
+		if value == "scan" || value == "code" {
+			common.WeChatDefaultLoginMethod = value
+		}
+	case "WeChatScanLoginPollIntervalSeconds":
+		common.WeChatScanLoginPollIntervalSeconds, _ = strconv.Atoi(value)
+	case "WeChatScanLoginTimeoutSeconds":
+		common.WeChatScanLoginTimeoutSeconds, _ = strconv.Atoi(value)
+	case "WeChatScanLoginMinPollIntervalSeconds":
+		common.WeChatScanLoginMinPollIntervalSeconds, _ = strconv.Atoi(value)
+	case "WeChatScanLoginCreateIntervalSecondsPerIP":
+		common.WeChatScanLoginCreateIntervalSecondsPerIP, _ = strconv.Atoi(value)
 	case "TelegramBotToken":
 		common.TelegramBotToken = value
 	case "TelegramBotName":
@@ -494,12 +557,58 @@ func updateOptionMap(key string, value string) (err error) {
 		common.TurnstileSiteKey = value
 	case "TurnstileSecretKey":
 		common.TurnstileSecretKey = value
+	case "SMSProvider":
+		common.SMSProviderName = value
+	case "SMSBaoEndpoint":
+		common.SMSBaoEndpoint = value
+	case "SMSBaoQueryEndpoint":
+		common.SMSBaoQueryEndpoint = value
+	case "SMSBaoUsername":
+		common.SMSBaoUsername = value
+	case "SMSBaoCredential":
+		common.SMSBaoCredential = value
+	case "SMSBaoCredentialMode":
+		common.SMSBaoCredentialMode = value
+	case "SMSBaoProductID":
+		common.SMSBaoProductID = value
+	case "SMSCodeValidMinutes":
+		common.SMSCodeValidMinutes, _ = strconv.Atoi(value)
+	case "SMSCodeCooldownSeconds":
+		common.SMSCodeCooldownSeconds, _ = strconv.Atoi(value)
+	case "SMSRateLimitWindowSeconds":
+		common.SMSRateLimitWindowSeconds, _ = strconv.Atoi(value)
+	case "SMSRateLimitPhoneCount":
+		common.SMSRateLimitPhoneCount, _ = strconv.Atoi(value)
+	case "SMSRateLimitIPCount":
+		common.SMSRateLimitIPCount, _ = strconv.Atoi(value)
+	case "SMSRateLimitAccountCount":
+		common.SMSRateLimitAccountCount, _ = strconv.Atoi(value)
+	case "SMSRateLimitSceneCount":
+		common.SMSRateLimitSceneCount, _ = strconv.Atoi(value)
+	case "SMSSignature":
+		common.SMSSignature = value
+	case "SMSSignatureReviewStatus":
+		common.SMSSignatureReviewStatus = value
+	case "SMSProductName":
+		common.SMSProductName = value
+	case "SMSTemplate":
+		common.SMSTemplate = value
 	case "QuotaForNewUser":
 		common.QuotaForNewUser, _ = strconv.Atoi(value)
 	case "QuotaForInviter":
 		common.QuotaForInviter, _ = strconv.Atoi(value)
 	case "QuotaForInvitee":
 		common.QuotaForInvitee, _ = strconv.Atoi(value)
+	case "AffiliateQuotaForInvitee":
+		common.AffiliateQuotaForInvitee, _ = strconv.Atoi(value)
+	case "AffiliateLevelOneQuotaForInvitee":
+		common.AffiliateLevelOneQuotaForInvitee, _ = strconv.Atoi(value)
+	case "AffiliateLevelTwoQuotaForInvitee":
+		common.AffiliateLevelTwoQuotaForInvitee, _ = strconv.Atoi(value)
+	case "AffiliateLevelOneQuotaForInviter":
+		common.AffiliateLevelOneQuotaForInviter, _ = strconv.Atoi(value)
+	case "AffiliateLevelTwoQuotaForInviter":
+		common.AffiliateLevelTwoQuotaForInviter, _ = strconv.Atoi(value)
 	case "QuotaRemindThreshold":
 		common.QuotaRemindThreshold, _ = strconv.Atoi(value)
 	case "PreConsumedQuota":

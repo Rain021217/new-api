@@ -39,6 +39,34 @@ export type UpdateOptionResponse = {
   message: string
 }
 
+export type SmsTestRequest = {
+  phone: string
+  scene: string
+  code: string
+}
+
+export type SmsTestResponse = {
+  success: boolean
+  message: string
+  data?: {
+    phone_masked?: string
+    provider?: string
+    provider_code?: string
+    template_scene?: string
+  }
+}
+
+export type SmsStatusResponse = {
+  success: boolean
+  message: string
+  data?: {
+    provider?: string
+    provider_code?: string
+    sent_count?: number
+    remaining_count?: number
+  }
+}
+
 export type ConfirmPaymentComplianceResponse = {
   success: boolean
   message: string
@@ -74,6 +102,8 @@ export type SiteSettings = {
 export type AuthSettings = {
   PasswordLoginEnabled: boolean
   PasswordRegisterEnabled: boolean
+  SMSLoginEnabled: boolean
+  SMSRegisterEnabled: boolean
   EmailVerificationEnabled: boolean
   RegisterEnabled: boolean
   EmailDomainRestrictionEnabled: boolean
@@ -103,6 +133,12 @@ export type AuthSettings = {
   WeChatServerAddress: string
   WeChatServerToken: string
   WeChatAccountQRCodeImageURL: string
+  WeChatCodeLoginEnabled: boolean
+  WeChatScanLoginEnabled: boolean
+  WeChatDefaultLoginMethod: 'scan' | 'code'
+  WeChatScanLoginPollIntervalSeconds: number
+  WeChatScanLoginTimeoutSeconds: number
+  WeChatScanLoginCreateIntervalSecondsPerIP: number
   TurnstileCheckEnabled: boolean
   TurnstileSiteKey: string
   TurnstileSecretKey: string
@@ -113,6 +149,26 @@ export type AuthSettings = {
   'passkey.allow_insecure_origin': boolean
   'passkey.user_verification': 'required' | 'preferred' | 'discouraged'
   'passkey.attachment_preference': '' | 'platform' | 'cross-platform'
+  SMSEnabled: boolean
+  SMSProvider: string
+  SMSBaoEndpoint: string
+  SMSBaoQueryEndpoint: string
+  SMSBaoUsername: string
+  SMSBaoCredential: string
+  SMSBaoCredentialMode: string
+  SMSBaoProductID: string
+  SMSCodeValidMinutes: number
+  SMSCodeCooldownSeconds: number
+  SMSSignature: string
+  SMSSignatureReviewStatus: 'pending' | 'approved' | 'rejected'
+  SMSProductName: string
+  SMSTemplate: string
+  SMSRateLimitEnabled: boolean
+  SMSRateLimitWindowSeconds: number
+  SMSRateLimitPhoneCount: number
+  SMSRateLimitIPCount: number
+  SMSRateLimitAccountCount: number
+  SMSRateLimitSceneCount: number
 }
 
 export type ContentSettings = {
@@ -189,6 +245,11 @@ export type BillingSettings = {
   PreConsumedQuota: number
   QuotaForInviter: number
   QuotaForInvitee: number
+  AffiliateQuotaForInvitee: number
+  AffiliateLevelOneQuotaForInvitee: number
+  AffiliateLevelTwoQuotaForInvitee: number
+  AffiliateLevelOneQuotaForInviter: number
+  AffiliateLevelTwoQuotaForInviter: number
   TopUpLink: string
   'general_setting.docs_link': string
   'quota_setting.enable_free_model_pre_consume': boolean

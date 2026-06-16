@@ -154,7 +154,13 @@ func OidcAuth(c *gin.Context) {
 			} else {
 				user.DisplayName = "OIDC User"
 			}
-			err := user.Insert(0)
+			affCode := session.Get("aff")
+			inviterId := 0
+			if affCode != nil {
+				inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+			}
+			user.InviterId = inviterId
+			err := user.Insert(inviterId)
 			if err != nil {
 				c.JSON(http.StatusOK, gin.H{
 					"success": false,

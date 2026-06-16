@@ -23,7 +23,11 @@ import type {
   Login2FAResponse,
   TwoFAPayload,
   RegisterPayload,
+  SmsRegisterPayload,
+  SmsPhoneLoginPayload,
   ApiResponse,
+  WechatLoginQrcodeResponse,
+  WechatLoginStatusResponse,
 } from './types'
 
 // ============================================================================
@@ -99,6 +103,36 @@ export async function wechatLoginByCode(code: string): Promise<ApiResponse> {
   return res.data
 }
 
+// WeChat scan-login: create a login QR code. The optional affiliate code is
+// forwarded so a scan-and-register on the sign-up page keeps the referral.
+export async function createWechatLoginQrcode(
+  affCode?: string
+): Promise<WechatLoginQrcodeResponse> {
+  const body = affCode ? { aff_code: affCode } : {}
+  const res = await api.post<WechatLoginQrcodeResponse>(
+    '/api/oauth/wechat/login/qrcode',
+    body
+  )
+  return res.data
+}
+
+// WeChat scan-login: poll the login status for a given login token. While the
+// QR is unscanned the response is { status: 'pending' }; on success it returns
+// the standard login response shape (id / require_2fa).
+export async function getWechatLoginStatus(
+  loginToken: string
+): Promise<WechatLoginStatusResponse> {
+  const res = await api.get<WechatLoginStatusResponse>(
+    '/api/oauth/wechat/login/status',
+    {
+      params: { login_token: loginToken },
+      // Each poll must reach the server; never dedupe/serve a stale promise.
+      disableDuplicate: true,
+    }
+  )
+  return res.data
+}
+
 // ----------------------------------------------------------------------------
 // Registration
 // ----------------------------------------------------------------------------
@@ -108,6 +142,105 @@ export async function register(payload: RegisterPayload): Promise<ApiResponse> {
   const res = await api.post(`/api/user/register`, payload, {
     params: { turnstile: payload.turnstile ?? '' },
   })
+  return res.data
+}
+
+export function buildSmsRegisterCodeRequest(phone: string, turnstile?: string) {
+  return {
+    url: '/api/user/sms/register/code',
+    data: {
+      phone,
+    },
+    config: {
+      params: {
+        turnstile: turnstile ?? '',
+      },
+    },
+  }
+}
+
+export function buildSmsRegisterRequest(payload: SmsRegisterPayload) {
+  return {
+    url: '/api/user/sms/register',
+    data: {
+      username: payload.username,
+      password: payload.password,
+      phone: payload.phone,
+      verification_code: payload.verification_code,
+      aff_code: payload.aff_code,
+    },
+    config: {
+      params: {
+        turnstile: payload.turnstile ?? '',
+      },
+    },
+  }
+}
+
+export async function sendSmsRegisterCode(
+  phone: string,
+  turnstile?: string
+): Promise<ApiResponse> {
+  const request = buildSmsRegisterCodeRequest(phone, turnstile)
+  const res = await api.post(request.url, request.data, request.config)
+  return res.data
+}
+
+export async function smsRegister(
+  payload: SmsRegisterPayload
+): Promise<ApiResponse> {
+  const request = buildSmsRegisterRequest(payload)
+  const res = await api.post(request.url, request.data, request.config)
+  return res.data
+}
+
+export function buildSmsLoginCodeRequest(phone: string, turnstile?: string) {
+  return {
+    url: '/api/user/sms/login/code',
+    data: {
+      phone,
+    },
+    config: {
+      params: {
+        turnstile: turnstile ?? '',
+      },
+    },
+  }
+}
+
+export function buildSmsPhoneLoginRequest(payload: SmsPhoneLoginPayload) {
+  return {
+    url: '/api/user/login/phone',
+    data: {
+      phone: payload.phone,
+      verification_code: payload.verification_code,
+    },
+    config: {
+      params: {
+        turnstile: payload.turnstile ?? '',
+      },
+    },
+  }
+}
+
+export async function sendSmsLoginCode(
+  phone: string,
+  turnstile?: string
+): Promise<ApiResponse> {
+  const request = buildSmsLoginCodeRequest(phone, turnstile)
+  const res = await api.post(request.url, request.data, request.config)
+  return res.data
+}
+
+export async function smsPhoneLogin(
+  payload: SmsPhoneLoginPayload
+): Promise<LoginResponse> {
+  const request = buildSmsPhoneLoginRequest(payload)
+  const res = await api.post<LoginResponse>(
+    request.url,
+    request.data,
+    request.config
+  )
   return res.data
 }
 

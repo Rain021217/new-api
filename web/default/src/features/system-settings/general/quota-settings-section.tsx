@@ -33,6 +33,8 @@ import {
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
+import { formatAffiliateRmbFromQuota } from '@/features/affiliate/lib'
+import { useSystemConfigStore } from '@/stores/system-config-store'
 import { FormDirtyIndicator } from '../components/form-dirty-indicator'
 import { FormNavigationGuard } from '../components/form-navigation-guard'
 import {
@@ -52,6 +54,11 @@ const quotaSchema = z.object({
   PreConsumedQuota: z.coerce.number().min(0),
   QuotaForInviter: z.coerce.number().min(0),
   QuotaForInvitee: z.coerce.number().min(0),
+  AffiliateQuotaForInvitee: z.coerce.number().min(-1),
+  AffiliateLevelOneQuotaForInvitee: z.coerce.number().min(-1),
+  AffiliateLevelTwoQuotaForInvitee: z.coerce.number().min(-1),
+  AffiliateLevelOneQuotaForInviter: z.coerce.number().min(-1),
+  AffiliateLevelTwoQuotaForInviter: z.coerce.number().min(-1),
   TopUpLink: z.string(),
   general_setting: z.object({
     docs_link: z.string(),
@@ -68,12 +75,30 @@ type QuotaSettingsSectionProps = {
   complianceConfirmed?: boolean
 }
 
+// FIX-UI4: read-only ¥ conversion shown next to raw Token/Quota reward fields.
+// The stored unit stays Quota; this only annotates the operator-facing value.
+// Sentinel/empty values (<= 0, e.g. the -1 "inherit" marker) are not converted.
+function QuotaRmbHint(props: {
+  value: number | string | null | undefined
+  config: { quotaPerUnit: number; usdExchangeRate: number }
+}) {
+  const { t } = useTranslation()
+  const quota = Number(props.value)
+  if (!Number.isFinite(quota) || quota <= 0) return null
+  return (
+    <FormDescription>
+      {t('Approx.')} {formatAffiliateRmbFromQuota(quota, props.config)}
+    </FormDescription>
+  )
+}
+
 export function QuotaSettingsSection({
   defaultValues,
   complianceConfirmed = true,
 }: QuotaSettingsSectionProps) {
   const { t } = useTranslation()
   const updateOption = useUpdateOption()
+  const currencyConfig = useSystemConfigStore((state) => state.config.currency)
   const handleNumberChange =
     (onChange: (value: number | string) => void) =>
     (event: ChangeEvent<HTMLInputElement>) => {
@@ -118,10 +143,21 @@ export function QuotaSettingsSection({
         <SettingsForm onSubmit={handleSubmit}>
           <SettingsPageFormActions
             onSave={handleSubmit}
+            saveLabel='Save Quota Settings'
             isSaving={updateOption.isPending || isSubmitting}
           />
           <FormDirtyIndicator isDirty={isDirty} />
           <SettingsFormGrid>
+            <SettingsFormGridItem span='full'>
+              <Alert>
+                <AlertDescription>
+                  {t(
+                    'Quota is the internal raw billing unit in new-api. User-facing amounts are converted by QuotaPerUnit and exchange rate; these fields keep the raw Token/Quota unit for precise billing compatibility.'
+                  )}
+                </AlertDescription>
+              </Alert>
+            </SettingsFormGridItem>
+
             <FormField
               control={form.control}
               name='QuotaForNewUser'
@@ -141,6 +177,7 @@ export function QuotaSettingsSection({
                   <FormDescription>
                     {t('Initial quota given to new users')}
                   </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
                   <FormMessage />
                 </FormItem>
               )}
@@ -189,6 +226,7 @@ export function QuotaSettingsSection({
                   <FormDescription>
                     {t('Quota given to users who invite others')}
                   </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
                   <FormMessage />
                 </FormItem>
               )}
@@ -213,6 +251,150 @@ export function QuotaSettingsSection({
                   <FormDescription>
                     {t('Quota given to invited users')}
                   </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='AffiliateQuotaForInvitee'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Affiliate Invitee Reward')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Quota given to users invited by active affiliate codes. Use -1 to inherit the normal invitee reward.'
+                    )}
+                  </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='AffiliateLevelOneQuotaForInvitee'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Level-one Affiliate Invitee Reward')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Quota given to new users invited by level-one affiliate codes. Use -1 to inherit the affiliate fallback reward.'
+                    )}
+                  </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='AffiliateLevelTwoQuotaForInvitee'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Level-two Affiliate Invitee Reward')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Quota given to new users invited by level-two affiliate codes. Use -1 to inherit the affiliate fallback reward.'
+                    )}
+                  </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='AffiliateLevelOneQuotaForInviter'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Level-one Affiliate Inviter Reward')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Quota reward granted to level-one affiliates when they invite new users. Use -1 to inherit the normal inviter reward.'
+                    )}
+                  </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <FormField
+              control={form.control}
+              name='AffiliateLevelTwoQuotaForInviter'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>
+                    {t('Level-two Affiliate Inviter Reward')}
+                  </FormLabel>
+                  <FormControl>
+                    <Input
+                      type='number'
+                      value={field.value ?? ''}
+                      onChange={handleNumberChange(field.onChange)}
+                      name={field.name}
+                      onBlur={field.onBlur}
+                      ref={field.ref}
+                    />
+                  </FormControl>
+                  <FormDescription>
+                    {t(
+                      'Quota reward granted to level-two affiliates when they invite new users. Use -1 to inherit the normal inviter reward.'
+                    )}
+                  </FormDescription>
+                  <QuotaRmbHint value={field.value} config={currencyConfig} />
                   <FormMessage />
                 </FormItem>
               )}

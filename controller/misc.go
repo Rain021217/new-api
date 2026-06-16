@@ -66,12 +66,20 @@ func GetStatus(c *gin.Context) {
 		"logo":                        common.Logo,
 		"footer_html":                 common.Footer,
 		"wechat_qrcode":               common.WeChatAccountQRCodeImageURL,
-		"wechat_login":                common.WeChatAuthEnabled,
-		"server_address":              system_setting.ServerAddress,
-		"turnstile_check":             common.TurnstileCheckEnabled,
-		"turnstile_site_key":          common.TurnstileSiteKey,
-		"docs_link":                   operation_setting.GetGeneralSetting().DocsLink,
-		"quota_per_unit":              common.QuotaPerUnit,
+		// wechat_login keeps the legacy single-flag contract — true when WeChat auth is on
+		// AND at least one of the two sub-flows is enabled — so older frontends keep working.
+		"wechat_login":                              common.WeChatAuthEnabled && (common.WeChatCodeLoginEnabled || common.WeChatScanLoginEnabled),
+		"wechat_code_login_enabled":                 common.WeChatAuthEnabled && common.WeChatCodeLoginEnabled,
+		"wechat_scan_login_enabled":                 common.WeChatAuthEnabled && common.WeChatScanLoginEnabled,
+		"wechat_login_default_method":               common.WeChatDefaultLoginMethod,
+		"wechat_scan_poll_interval_seconds":         common.WeChatScanLoginPollIntervalSeconds,
+		"wechat_scan_timeout_seconds":               common.WeChatScanLoginTimeoutSeconds,
+		"wechat_scan_login_create_interval_seconds": common.WeChatScanLoginCreateIntervalSecondsPerIP,
+		"server_address":                            system_setting.ServerAddress,
+		"turnstile_check":                           common.TurnstileCheckEnabled,
+		"turnstile_site_key":                        common.TurnstileSiteKey,
+		"docs_link":                                 operation_setting.GetGeneralSetting().DocsLink,
+		"quota_per_unit":                            common.QuotaPerUnit,
 		// 兼容旧前端：保留 display_in_currency，同时提供新的 quota_display_type
 		"display_in_currency":           operation_setting.IsCurrencyDisplay(),
 		"quota_display_type":            operation_setting.GetQuotaDisplayType(),
@@ -90,7 +98,13 @@ func GetStatus(c *gin.Context) {
 		"register_enabled":              common.RegisterEnabled,
 		"password_login_enabled":        common.PasswordLoginEnabled,
 		"password_register_enabled":     common.PasswordRegisterEnabled,
-		"default_use_auto_group":        setting.DefaultUseAutoGroup,
+		"sms_enabled":                   common.SMSEnabled,
+		// sms_login_enabled / sms_register_enabled gate each sub-flow independently while still
+		// requiring the SMSEnabled master switch to be on; sms_enabled is kept for backward
+		// compatibility with older frontends that only know the single master flag.
+		"sms_login_enabled":      common.SMSEnabled && common.SMSLoginEnabled,
+		"sms_register_enabled":   common.SMSEnabled && common.SMSRegisterEnabled,
+		"default_use_auto_group": setting.DefaultUseAutoGroup,
 
 		"usd_exchange_rate": operation_setting.USDExchangeRate,
 		"price":             operation_setting.Price,

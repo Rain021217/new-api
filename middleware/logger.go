@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"fmt"
+	"regexp"
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,16 @@ func RouteTag(tag string) gin.HandlerFunc {
 		c.Set(RouteTagKey, tag)
 		c.Next()
 	}
+}
+
+// sensitiveQueryRe matches bearer-like credentials carried in the query string so they can
+// be redacted before reaching access logs. login_token is the WeChat scan-login session
+// token (polled every ~2s); logging it verbatim would let anyone with log access replay the
+// in-flight login.
+var sensitiveQueryRe = regexp.MustCompile(`(login_token=)[^&]*`)
+
+func redactSensitiveQuery(path string) string {
+	return sensitiveQueryRe.ReplaceAllString(path, "${1}[redacted]")
 }
 
 func SetUpLogger(server *gin.Engine) {
@@ -34,7 +45,7 @@ func SetUpLogger(server *gin.Engine) {
 			param.Latency,
 			param.ClientIP,
 			param.Method,
-			param.Path,
+			redactSensitiveQuery(param.Path),
 		)
 	}))
 }

@@ -67,7 +67,15 @@ export function OAuthProviders({
 
   const providerButtons: ProviderButton[] = []
 
-  if (status?.wechat_login && onWeChatLogin) {
+  // The legacy umbrella flag (`wechat_login`) and the two new tunables both
+  // gate the WeChat entry point. As long as the caller wired `onWeChatLogin`
+  // (i.e. its own gate accepted scan-or-code), we render the button.
+  const wechatEntryEnabled = Boolean(
+    status?.wechat_login ||
+      status?.wechat_scan_login_enabled ||
+      status?.wechat_code_login_enabled
+  )
+  if (wechatEntryEnabled && onWeChatLogin) {
     providerButtons.push({
       key: 'wechat',
       label: t('Continue with WeChat'),

@@ -49,6 +49,8 @@ import {
   Form,
   Icon,
   Modal,
+  TabPane,
+  Tabs,
 } from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
@@ -57,6 +59,7 @@ import TelegramLoginButton from 'react-telegram-login';
 import {
   IconGithubLogo,
   IconMail,
+  IconUser,
   IconLock,
   IconKey,
 } from '@douyinfe/semi-icons';
@@ -64,8 +67,13 @@ import OIDCIcon from '../common/logo/OIDCIcon';
 import WeChatIcon from '../common/logo/WeChatIcon';
 import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import TwoFAVerification from './TwoFAVerification';
+import WeChatScanLoginModal from './WeChatScanLoginModal';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import {
+  buildSmsLoginCodeRequest,
+  buildSmsPhoneLoginRequest,
+} from './smsRegisterRequest.js';
 
 const LoginForm = () => {
   let navigate = useNavigate();
@@ -78,6 +86,8 @@ const LoginForm = () => {
   const [inputs, setInputs] = useState({
     username: '',
     password: '',
+    phone: '',
+    sms_verification_code: '',
     wechat_verification_code: '',
   });
   const { username, password } = inputs;
@@ -89,13 +99,20 @@ const LoginForm = () => {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
   const [showWeChatLoginModal, setShowWeChatLoginModal] = useState(false);
+  const [showWeChatScanModal, setShowWeChatScanModal] = useState(false);
+  const [showWeChatChooser, setShowWeChatChooser] = useState(false);
+  const [wechatChooserTab, setWechatChooserTab] = useState('scan');
   const [showEmailLogin, setShowEmailLogin] = useState(false);
+  const [showSmsLogin, setShowSmsLogin] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
   const [githubLoading, setGithubLoading] = useState(false);
   const [discordLoading, setDiscordLoading] = useState(false);
   const [oidcLoading, setOidcLoading] = useState(false);
   const [linuxdoLoading, setLinuxdoLoading] = useState(false);
   const [emailLoginLoading, setEmailLoginLoading] = useState(false);
+  const [smsLoginLoading, setSmsLoginLoading] = useState(false);
+  const [smsCodeLoading, setSmsCodeLoading] = useState(false);
+  const [smsLoginCooldown, setSmsLoginCooldown] = useState(0);
   const [loginLoading, setLoginLoading] = useState(false);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [otherLoginOptionsLoading, setOtherLoginOptionsLoading] =
@@ -133,14 +150,30 @@ const LoginForm = () => {
   }, [statusState?.status]);
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
+  const smsLoginEnabled = Boolean(
+    status.sms_enabled ?? status.data?.sms_enabled,
+  );
+  // WeChat method tunables (fall back to the legacy umbrella flag when the
+  // new tunables are not present on /api/status yet).
+  const wechatScanLoginEnabled = Boolean(
+    status.wechat_scan_login_enabled ?? status.wechat_login,
+  );
+  const wechatCodeLoginEnabled = Boolean(
+    status.wechat_code_login_enabled ?? status.wechat_login,
+  );
+  const wechatLoginEnabled =
+    wechatScanLoginEnabled || wechatCodeLoginEnabled || Boolean(status.wechat_login);
+  const wechatDefaultMethod =
+    status.wechat_login_default_method === 'code' ? 'code' : 'scan';
   const hasOAuthLoginOptions = Boolean(
     status.github_oauth ||
-      status.discord_oauth ||
-      status.oidc_enabled ||
-      status.wechat_login ||
-      status.linuxdo_oauth ||
-      status.telegram_oauth ||
-      hasCustomOAuthProviders,
+    status.discord_oauth ||
+    status.oidc_enabled ||
+    wechatLoginEnabled ||
+    status.linuxdo_oauth ||
+    status.telegram_oauth ||
+    smsLoginEnabled ||
+    hasCustomOAuthProviders,
   );
 
   useEffect(() => {
@@ -153,6 +186,18 @@ const LoginForm = () => {
     setHasUserAgreement(status?.user_agreement_enabled || false);
     setHasPrivacyPolicy(status?.privacy_policy_enabled || false);
   }, [status]);
+
+  useEffect(() => {
+    if (smsLoginCooldown <= 0) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      setSmsLoginCooldown((seconds) => Math.max(seconds - 1, 0));
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [smsLoginCooldown]);
 
   useEffect(() => {
     isPasskeySupported()
@@ -178,13 +223,48 @@ const LoginForm = () => {
       return;
     }
     setWechatLoading(true);
-    setShowWeChatLoginModal(true);
+    // Route to the correct surface based on which methods are enabled.
+    // - both enabled: open the chooser modal (Tabs)
+    // - scan only:    open the scan-login modal directly
+    // - code only:    open the legacy verification-code modal directly
+    if (wechatScanLoginEnabled && wechatCodeLoginEnabled) {
+      setWechatChooserTab(wechatDefaultMethod);
+      setShowWeChatChooser(true);
+    } else if (wechatScanLoginEnabled) {
+      setShowWeChatScanModal(true);
+    } else if (wechatCodeLoginEnabled) {
+      setShowWeChatLoginModal(true);
+    }
     setWechatLoading(false);
+  };
+
+  // Hand off from the chooser into the matching modal.
+  const openWeChatMethod = (method) => {
+    setShowWeChatChooser(false);
+    if (method === 'code') {
+      setShowWeChatLoginModal(true);
+    } else {
+      setShowWeChatScanModal(true);
+    }
+  };
+
+  // 微信扫码登录成功：复用密码登录的成功流程
+  const handleWeChatScanSuccess = (data) => {
+    userDispatch({ type: 'login', payload: data });
+    setUserData(data);
+    updateAPI();
+    navigate('/console');
+  };
+
+  // 微信扫码登录需要两步验证：复用现有 2FA 流程
+  const handleWeChatScanRequire2FA = () => {
+    setShowWeChatScanModal(false);
+    setShowTwoFA(true);
   };
 
   const onSubmitWeChatVerificationCode = async () => {
     if (turnstileEnabled && turnstileToken === '') {
-      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
     setWechatCodeSubmitLoading(true);
@@ -199,13 +279,13 @@ const LoginForm = () => {
         setUserData(data);
         updateAPI();
         navigate('/');
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         setShowWeChatLoginModal(false);
       } else {
         showError(message);
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     } finally {
       setWechatCodeSubmitLoading(false);
     }
@@ -221,7 +301,7 @@ const LoginForm = () => {
       return;
     }
     if (turnstileEnabled && turnstileToken === '') {
-      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
     setSubmitted(true);
@@ -247,7 +327,7 @@ const LoginForm = () => {
           userDispatch({ type: 'login', payload: data });
           setUserData(data);
           updateAPI();
-          showSuccess('登录成功！');
+          showSuccess(t('登录成功！'));
           if (username === 'root' && password === '123456') {
             Modal.error({
               title: '您正在使用默认密码！',
@@ -260,14 +340,98 @@ const LoginForm = () => {
           showError(message);
         }
       } else {
-        showError('请输入用户名和密码！');
+        showError(t('请输入用户名和密码！'));
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     } finally {
       setLoginLoading(false);
     }
   }
+
+  const sendSmsLoginVerificationCode = async () => {
+    if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
+      showInfo(t('请先阅读并同意用户协议和隐私政策'));
+      return;
+    }
+    if (!inputs.phone) {
+      showInfo(t('请输入手机号'));
+      return;
+    }
+    if (turnstileEnabled && turnstileToken === '') {
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
+      return;
+    }
+
+    setSmsCodeLoading(true);
+    try {
+      const request = buildSmsLoginCodeRequest(
+        inputs.phone.trim(),
+        turnstileToken,
+      );
+      const res = await API.post(request.url, request.data, request.config);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('验证码发送成功，请检查短信！'));
+        setSmsLoginCooldown(30);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(t('发送验证码失败，请重试'));
+    } finally {
+      setSmsCodeLoading(false);
+    }
+  };
+
+  const handleSmsLoginSubmit = async () => {
+    if ((hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms) {
+      showInfo(t('请先阅读并同意用户协议和隐私政策'));
+      return;
+    }
+    if (!inputs.phone) {
+      showInfo(t('请输入手机号'));
+      return;
+    }
+    if (!inputs.sms_verification_code) {
+      showInfo(t('请输入短信验证码'));
+      return;
+    }
+    if (turnstileEnabled && turnstileToken === '') {
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
+      return;
+    }
+
+    setSmsLoginLoading(true);
+    try {
+      const request = buildSmsPhoneLoginRequest({
+        phone: inputs.phone.trim(),
+        verificationCode: inputs.sms_verification_code.trim(),
+        turnstileToken,
+      });
+      const res = await API.post(request.url, request.data, request.config);
+      const { success, message, data } = res.data;
+      if (success) {
+        if (data && data.require_2fa) {
+          setShowTwoFA(true);
+          setSmsLoginLoading(false);
+          return;
+        }
+
+        userDispatch({ type: 'login', payload: data });
+        setUserData(data);
+        updateAPI();
+        showSuccess(t('登录成功！'));
+        navigate('/console');
+      } else {
+        showError(message || t('手机号登录失败，请重试'));
+      }
+    } catch (error) {
+      showError(t('手机号登录失败，请重试'));
+    } finally {
+      setSmsLoginLoading(false);
+    }
+  };
 
   // 添加Telegram登录处理函数
   const onTelegramLoginClicked = async (response) => {
@@ -297,7 +461,7 @@ const LoginForm = () => {
       if (success) {
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         setUserData(data);
         updateAPI();
         navigate('/');
@@ -305,7 +469,7 @@ const LoginForm = () => {
         showError(message);
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     }
   };
 
@@ -408,7 +572,15 @@ const LoginForm = () => {
   const handleEmailLoginClick = () => {
     setEmailLoginLoading(true);
     setShowEmailLogin(true);
+    setShowSmsLogin(false);
     setEmailLoginLoading(false);
+  };
+
+  const handleSmsLoginClick = () => {
+    setSmsLoginLoading(true);
+    setShowEmailLogin(false);
+    setShowSmsLogin(true);
+    setSmsLoginLoading(false);
   };
 
   const handlePasskeyLogin = async () => {
@@ -417,11 +589,11 @@ const LoginForm = () => {
       return;
     }
     if (!passkeySupported) {
-      showInfo('当前环境无法使用 Passkey 登录');
+      showInfo(t('当前环境无法使用 Passkey 登录'));
       return;
     }
     if (!window.PublicKeyCredential) {
-      showInfo('当前浏览器不支持 Passkey');
+      showInfo(t('当前浏览器不支持 Passkey'));
       return;
     }
 
@@ -442,7 +614,7 @@ const LoginForm = () => {
       });
       const payload = buildAssertionResult(assertion);
       if (!payload) {
-        showError('Passkey 验证失败，请重试');
+        showError(t('Passkey 验证失败，请重试'));
         return;
       }
 
@@ -455,16 +627,16 @@ const LoginForm = () => {
         userDispatch({ type: 'login', payload: finish.data });
         setUserData(finish.data);
         updateAPI();
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         navigate('/console');
       } else {
-        showError(finish.message || 'Passkey 登录失败，请重试');
+        showError(finish.message || t('Passkey 登录失败，请重试'));
       }
     } catch (error) {
       if (error?.name === 'AbortError') {
-        showInfo('已取消 Passkey 登录');
+        showInfo(t('已取消 Passkey 登录'));
       } else {
-        showError('Passkey 登录失败，请重试');
+        showError(t('Passkey 登录失败，请重试'));
       }
     } finally {
       setPasskeyLoading(false);
@@ -482,6 +654,7 @@ const LoginForm = () => {
   const handleOtherLoginOptionsClick = () => {
     setOtherLoginOptionsLoading(true);
     setShowEmailLogin(false);
+    setShowSmsLogin(false);
     setOtherLoginOptionsLoading(false);
   };
 
@@ -490,14 +663,21 @@ const LoginForm = () => {
     userDispatch({ type: 'login', payload: data });
     setUserData(data);
     updateAPI();
-    showSuccess('登录成功！');
+    showSuccess(t('登录成功！'));
     navigate('/console');
   };
 
   // 返回登录页面
   const handleBackToLogin = () => {
     setShowTwoFA(false);
-    setInputs({ username: '', password: '', wechat_verification_code: '' });
+    setInputs({
+      username: '',
+      password: '',
+      phone: '',
+      sms_verification_code: '',
+      wechat_verification_code: '',
+    });
+    setShowSmsLogin(false);
   };
 
   const renderOAuthOptions = () => {
@@ -519,7 +699,7 @@ const LoginForm = () => {
             </div>
             <div className='px-2 py-8'>
               <div className='space-y-3'>
-                {status.wechat_login && (
+                {wechatLoginEnabled && (
                   <Button
                     theme='outline'
                     className='w-full h-12 flex items-center justify-center !rounded-full border border-gray-200 hover:bg-gray-50 transition-colors'
@@ -656,6 +836,24 @@ const LoginForm = () => {
                 >
                   <span className='ml-3'>{t('使用 邮箱或用户名 登录')}</span>
                 </Button>
+
+                {smsLoginEnabled && (
+                  <Button
+                    theme='outline'
+                    type='tertiary'
+                    className='w-full h-12 flex items-center justify-center !rounded-full !border !border-emerald-300 !bg-emerald-50 !text-emerald-700 hover:!bg-emerald-100 transition-colors'
+                    style={{
+                      backgroundColor: '#ecfdf5',
+                      borderColor: '#6ee7b7',
+                      color: '#047857',
+                    }}
+                    icon={<IconUser size='large' />}
+                    onClick={handleSmsLoginClick}
+                    loading={smsLoginLoading}
+                  >
+                    <span className='ml-3'>{t('使用 手机号 登录')}</span>
+                  </Button>
+                )}
               </div>
 
               {(hasUserAgreement || hasPrivacyPolicy) && (
@@ -869,6 +1067,219 @@ const LoginForm = () => {
     );
   };
 
+  const renderSmsLoginForm = () => {
+    return (
+      <div className='flex flex-col items-center'>
+        <div className='w-full max-w-md'>
+          <div className='flex items-center justify-center mb-6 gap-2'>
+            <img src={logo} alt='Logo' className='h-10 rounded-full' />
+            <Title heading={3}>{systemName}</Title>
+          </div>
+
+          <Card className='border-0 !rounded-2xl overflow-hidden'>
+            <div className='flex justify-center pt-6 pb-2'>
+              <Title heading={3} className='text-gray-800 dark:text-gray-200'>
+                {t('手机号登录')}
+              </Title>
+            </div>
+            <div className='px-2 py-8'>
+              <Form className='space-y-3'>
+                <Form.Input
+                  field='phone'
+                  label={t('手机号')}
+                  placeholder={t('请输入手机号')}
+                  name='phone'
+                  value={inputs.phone}
+                  onChange={(value) => handleChange('phone', value)}
+                  prefix={<IconUser />}
+                />
+
+                <Form.Input
+                  field='sms_verification_code'
+                  label={t('短信验证码')}
+                  placeholder={t('请输入短信验证码')}
+                  name='sms_verification_code'
+                  value={inputs.sms_verification_code}
+                  onChange={(value) =>
+                    handleChange('sms_verification_code', value)
+                  }
+                  prefix={<IconKey />}
+                  suffix={
+                    <Button
+                      theme='borderless'
+                      type='primary'
+                      htmlType='button'
+                      loading={smsCodeLoading}
+                      disabled={smsLoginCooldown > 0}
+                      onClick={sendSmsLoginVerificationCode}
+                    >
+                      {smsLoginCooldown > 0
+                        ? t('{{seconds}} 秒后重试', {
+                            seconds: smsLoginCooldown,
+                          })
+                        : t('发送验证码')}
+                    </Button>
+                  }
+                />
+
+                {(hasUserAgreement || hasPrivacyPolicy) && (
+                  <div className='pt-4'>
+                    <Checkbox
+                      checked={agreedToTerms}
+                      onChange={(e) => setAgreedToTerms(e.target.checked)}
+                    >
+                      <Text size='small' className='text-gray-600'>
+                        {t('我已阅读并同意')}
+                        {hasUserAgreement && (
+                          <>
+                            <a
+                              href='/user-agreement'
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='text-blue-600 hover:text-blue-800 mx-1'
+                            >
+                              {t('用户协议')}
+                            </a>
+                          </>
+                        )}
+                        {hasUserAgreement && hasPrivacyPolicy && t('和')}
+                        {hasPrivacyPolicy && (
+                          <>
+                            <a
+                              href='/privacy-policy'
+                              target='_blank'
+                              rel='noopener noreferrer'
+                              className='text-blue-600 hover:text-blue-800 mx-1'
+                            >
+                              {t('隐私政策')}
+                            </a>
+                          </>
+                        )}
+                      </Text>
+                    </Checkbox>
+                  </div>
+                )}
+
+                <div className='space-y-2 pt-2'>
+                  <Button
+                    theme='solid'
+                    className='w-full !rounded-full'
+                    type='primary'
+                    htmlType='button'
+                    onClick={handleSmsLoginSubmit}
+                    loading={smsLoginLoading}
+                    disabled={
+                      (hasUserAgreement || hasPrivacyPolicy) && !agreedToTerms
+                    }
+                  >
+                    {t('手机号登录')}
+                  </Button>
+
+                  <Button
+                    theme='outline'
+                    type='tertiary'
+                    className='w-full !rounded-full'
+                    htmlType='button'
+                    onClick={handleEmailLoginClick}
+                    loading={emailLoginLoading}
+                  >
+                    {t('使用 邮箱或用户名 登录')}
+                  </Button>
+                </div>
+              </Form>
+
+              {hasOAuthLoginOptions && (
+                <>
+                  <Divider margin='12px' align='center'>
+                    {t('或')}
+                  </Divider>
+
+                  <div className='mt-4 text-center'>
+                    <Button
+                      theme='outline'
+                      type='tertiary'
+                      className='w-full !rounded-full'
+                      htmlType='button'
+                      onClick={handleOtherLoginOptionsClick}
+                      loading={otherLoginOptionsLoading}
+                    >
+                      {t('其他登录选项')}
+                    </Button>
+                  </div>
+                </>
+              )}
+
+              {!status.self_use_mode_enabled && (
+                <div className='mt-6 text-center text-sm'>
+                  <Text>
+                    {t('没有账户？')}{' '}
+                    <Link
+                      to='/register'
+                      className='text-blue-600 hover:text-blue-800 font-medium'
+                    >
+                      {t('注册')}
+                    </Link>
+                  </Text>
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  };
+
+  // 微信登录方式选择弹窗（扫码 / 验证码 二选一）
+  const renderWeChatChooserModal = () => {
+    if (!wechatScanLoginEnabled || !wechatCodeLoginEnabled) {
+      return null;
+    }
+    return (
+      <Modal
+        title={t('微信登录')}
+        visible={showWeChatChooser}
+        onCancel={() => setShowWeChatChooser(false)}
+        footer={null}
+        centered
+      >
+        <Tabs
+          activeKey={wechatChooserTab}
+          onChange={setWechatChooserTab}
+          type='button'
+        >
+          <TabPane tab={t('扫码登录')} itemKey='scan'>
+            <div className='py-4 text-center'>
+              <p className='mb-4'>{t('打开微信扫描二维码登录')}</p>
+              <Button
+                theme='solid'
+                type='primary'
+                className='!rounded-full'
+                onClick={() => openWeChatMethod('scan')}
+              >
+                {t('打开扫码登录')}
+              </Button>
+            </div>
+          </TabPane>
+          <TabPane tab={t('验证码登录')} itemKey='code'>
+            <div className='py-4 text-center'>
+              <p className='mb-4'>
+                {t('微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）')}
+              </p>
+              <Button
+                theme='solid'
+                type='primary'
+                className='!rounded-full'
+                onClick={() => openWeChatMethod('code')}
+              >
+                {t('打开验证码登录')}
+              </Button>
+            </div>
+          </TabPane>
+        </Tabs>
+      </Modal>
+    );
+  };
+
   // 微信登录模态框
   const renderWeChatLoginModal = () => {
     return (
@@ -958,11 +1369,22 @@ const LoginForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailLogin ||
-        !hasOAuthLoginOptions
-          ? renderEmailLoginForm()
-          : renderOAuthOptions()}
+        {showSmsLogin
+          ? renderSmsLoginForm()
+          : showEmailLogin || !hasOAuthLoginOptions
+            ? renderEmailLoginForm()
+            : renderOAuthOptions()}
         {renderWeChatLoginModal()}
+        {renderWeChatChooserModal()}
+        {wechatScanLoginEnabled && (
+          <WeChatScanLoginModal
+            visible={showWeChatScanModal}
+            onClose={() => setShowWeChatScanModal(false)}
+            affCode={localStorage.getItem('aff') || undefined}
+            onLoginSuccess={handleWeChatScanSuccess}
+            onRequire2FA={handleWeChatScanRequire2FA}
+          />
+        )}
         {render2FAModal()}
 
         {turnstileEnabled && (

@@ -121,10 +121,63 @@ export async function bindEmail(
 }
 
 /**
- * Bind WeChat account
+ * Send SMS verification code for phone binding (authenticated)
+ */
+export async function sendPhoneBindCode(
+  phone: string
+): Promise<ApiResponse<{ phone_masked?: string }>> {
+  const res = await api.post('/api/user/sms/bind/code', { phone })
+  return res.data
+}
+
+/**
+ * Bind phone number to the current user
+ */
+export async function bindPhone(
+  phone: string,
+  verificationCode: string
+): Promise<ApiResponse<{ phone_masked?: string }>> {
+  const res = await api.post('/api/user/sms/bind', {
+    phone,
+    verification_code: verificationCode,
+  })
+  return res.data
+}
+
+/**
+ * Bind WeChat account using the legacy code flow
  */
 export async function bindWeChat(code: string): Promise<ApiResponse> {
   const res = await api.get(`/api/oauth/wechat/bind?code=${code}`)
+  return res.data
+}
+
+/**
+ * Create a scan-bind QR-code session for the authenticated user.
+ */
+export async function createWechatBindQrcode(): Promise<
+  ApiResponse<{
+    scene_id: string
+    login_token: string
+    qrcode_image_url: string
+    expire_seconds: number
+    poll_interval_seconds: number
+  }>
+> {
+  const res = await api.post('/api/user/wechat/bind/qrcode')
+  return res.data
+}
+
+/**
+ * Poll the scan-bind session; on success the openid is written onto the user.
+ */
+export async function getWechatBindStatus(
+  loginToken: string
+): Promise<ApiResponse<{ status: 'pending' | 'expired' | 'success' }>> {
+  const res = await api.get(
+    `/api/user/wechat/bind/status?login_token=${encodeURIComponent(loginToken)}`,
+    { disableDuplicate: true }
+  )
   return res.data
 }
 

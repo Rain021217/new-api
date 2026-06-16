@@ -16,7 +16,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 For commercial licensing, please contact support@quantumnous.com
 */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { z } from 'zod'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -24,6 +24,7 @@ import { Loader2 } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { toast } from 'sonner'
 import { cn } from '@/lib/utils'
+import { useCountdown } from '@/hooks/use-countdown'
 import { useStatus } from '@/hooks/use-status'
 import { Button } from '@/components/ui/button'
 import {
@@ -35,14 +36,16 @@ import {
   FormMessage,
 } from '@/components/ui/form'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Dialog } from '@/components/dialog'
 import { PasswordInput } from '@/components/password-input'
 import { Turnstile } from '@/components/turnstile'
-import { register, wechatLoginByCode } from '@/features/auth/api'
+import { register, sendSmsRegisterCode, smsRegister } from '@/features/auth/api'
 import { LegalConsent } from '@/features/auth/components/legal-consent'
 import { OAuthProviders } from '@/features/auth/components/oauth-providers'
-import { registerFormSchema } from '@/features/auth/constants'
+import { WeChatLoginDialog } from '@/features/auth/components/wechat-login-dialog'
+import {
+  registerFormSchema,
+  SMS_REGISTER_COUNTDOWN,
+} from '@/features/auth/constants'
 import { useAuthRedirect } from '@/features/auth/hooks/use-auth-redirect'
 import { useEmailVerification } from '@/features/auth/hooks/use-email-verification'
 import { useTurnstile } from '@/features/auth/hooks/use-turnstile'
@@ -57,11 +60,14 @@ export function SignUpForm({
 }: React.HTMLAttributes<HTMLFormElement>) {
   const { t } = useTranslation()
   const [isLoading, setIsLoading] = useState(false)
+  const [registerMode, setRegisterMode] = useState<'username' | 'sms'>(
+    'username'
+  )
   const [verificationCode, setVerificationCode] = useState('')
+  const [smsVerificationCode, setSmsVerificationCode] = useState('')
+  const [isSendingSmsCode, setIsSendingSmsCode] = useState(false)
   const [agreedToLegal, setAgreedToLegal] = useState(false)
-  const [wechatCode, setWeChatCode] = useState('')
   const [isWeChatDialogOpen, setIsWeChatDialogOpen] = useState(false)
-  const [isWeChatSubmitting, setIsWeChatSubmitting] = useState(false)
   const legalConsentErrorMessage = t('Please agree to the legal terms first')
 
   const { status } = useStatus()
@@ -72,7 +78,13 @@ export function SignUpForm({
     setTurnstileToken,
     validateTurnstile,
   } = useTurnstile()
-  const { redirectToLogin, handleLoginSuccess } = useAuthRedirect()
+  const { redirectToLogin, handleLoginSuccess, redirectTo2FA } =
+    useAuthRedirect()
+  const {
+    secondsLeft: smsSecondsLeft,
+    isActive: isSmsCountdownActive,
+    start: startSmsCountdown,
+  } = useCountdown({ initialSeconds: SMS_REGISTER_COUNTDOWN })
   const {
     isSending: isSendingCode,
     secondsLeft,
@@ -88,13 +100,20 @@ export function SignUpForm({
     defaultValues: {
       username: '',
       email: '',
+      phone: '',
       password: '',
       confirmPassword: '',
     },
   })
 
   const emailValue = form.watch('email')
-  const emailVerificationRequired = !!status?.email_verification
+  const phoneValue = form.watch('phone')
+  const smsRegisterEnabled = Boolean(
+    status?.sms_enabled ?? status?.data?.sms_enabled
+  )
+  const isSmsRegisterMode = registerMode === 'sms'
+  const emailVerificationRequired =
+    !isSmsRegisterMode && !!status?.email_verification
   const hasUserAgreement = Boolean(status?.user_agreement_enabled)
   const hasPrivacyPolicy = Boolean(status?.privacy_policy_enabled)
   const requiresLegalConsent = hasUserAgreement || hasPrivacyPolicy
@@ -102,22 +121,16 @@ export function SignUpForm({
     status?.oauth_register_enabled ??
     status?.data?.oauth_register_enabled ??
     true
-  const hasWeChatLogin = Boolean(status?.wechat_login)
+  // Either explicit flag (new) or the legacy umbrella flag enables the WeChat
+  // login entry point. The dialog body decides which methods to actually show.
+  const wechatScanEnabled = Boolean(
+    status?.wechat_scan_login_enabled ?? status?.wechat_login
+  )
+  const wechatCodeEnabled = Boolean(
+    status?.wechat_code_login_enabled ?? status?.wechat_login
+  )
+  const hasWeChatLogin = wechatScanEnabled || wechatCodeEnabled
   const turnstileReady = !isTurnstileEnabled || Boolean(turnstileToken)
-
-  const wechatQrCodeUrl = useMemo(() => {
-    return (
-      status?.wechat_qrcode ||
-      status?.wechat_qr_code ||
-      status?.wechat_qrcode_image_url ||
-      status?.wechat_qr_code_image_url ||
-      status?.wechat_account_qrcode_image_url ||
-      status?.WeChatAccountQRCodeImageURL ||
-      status?.data?.wechat_qrcode ||
-      status?.data?.WeChatAccountQRCodeImageURL ||
-      ''
-    )
-  }, [status])
 
   useEffect(() => {
     if (requiresLegalConsent) {
@@ -126,6 +139,13 @@ export function SignUpForm({
       setAgreedToLegal(true)
     }
   }, [requiresLegalConsent])
+
+  useEffect(() => {
+    if (!smsRegisterEnabled && registerMode === 'sms') {
+      setRegisterMode('username')
+      setSmsVerificationCode('')
+    }
+  }, [registerMode, smsRegisterEnabled])
 
   useEffect(() => {
     const aff = new URLSearchParams(window.location.search).get('aff')?.trim()
@@ -152,18 +172,39 @@ export function SignUpForm({
       }
     }
 
+    const phone = data.phone?.trim() ?? ''
+    if (isSmsRegisterMode) {
+      if (!phone) {
+        toast.error(t('Please enter your phone number'))
+        return
+      }
+      if (!smsVerificationCode.trim()) {
+        toast.error(t('Please enter the SMS verification code'))
+        return
+      }
+    }
+
     if (!validateTurnstile()) return
 
     setIsLoading(true)
     try {
-      const res = await register({
-        username: data.username,
-        password: data.password,
-        email: data.email || undefined,
-        verification_code: verificationCode || undefined,
-        aff_code: getAffiliateCode(),
-        turnstile: turnstileToken,
-      })
+      const res = isSmsRegisterMode
+        ? await smsRegister({
+            username: data.username,
+            password: data.password,
+            phone,
+            verification_code: smsVerificationCode.trim(),
+            aff_code: getAffiliateCode(),
+            turnstile: turnstileToken,
+          })
+        : await register({
+            username: data.username,
+            password: data.password,
+            email: data.email || undefined,
+            verification_code: verificationCode || undefined,
+            aff_code: getAffiliateCode(),
+            turnstile: turnstileToken,
+          })
 
       if (res?.success) {
         toast.success(t('Account created! Please sign in'))
@@ -182,6 +223,39 @@ export function SignUpForm({
     await sendCode(emailValue || '')
   }
 
+  async function handleSendSmsVerificationCode() {
+    const phone = phoneValue?.trim()
+    if (!phone) {
+      toast.error(t('Please enter your phone number first'))
+      return
+    }
+    if (!validateTurnstile()) return
+
+    setIsSendingSmsCode(true)
+    try {
+      const res = await sendSmsRegisterCode(phone, turnstileToken)
+      if (res?.success) {
+        startSmsCountdown()
+        toast.success(t('SMS verification code sent'))
+      } else {
+        toast.error(res?.message || t('Failed to send SMS verification code'))
+      }
+    } catch (_error) {
+      // Errors are handled by global interceptor
+    } finally {
+      setIsSendingSmsCode(false)
+    }
+  }
+
+  function handleRegisterModeChange(nextMode: 'username' | 'sms') {
+    setRegisterMode(nextMode)
+    if (nextMode === 'sms') {
+      setVerificationCode('')
+    } else {
+      setSmsVerificationCode('')
+    }
+  }
+
   const handleOpenWeChatDialog = () => {
     if (requiresLegalConsent && !agreedToLegal) {
       toast.error(legalConsentErrorMessage)
@@ -191,37 +265,6 @@ export function SignUpForm({
     setIsWeChatDialogOpen(true)
   }
 
-  const handleWeChatDialogChange = (open: boolean) => {
-    setIsWeChatDialogOpen(open)
-    if (!open) {
-      setWeChatCode('')
-      setIsWeChatSubmitting(false)
-    }
-  }
-
-  async function handleWeChatLogin() {
-    if (!wechatCode.trim()) {
-      toast.error(t('Please enter the verification code'))
-      return
-    }
-
-    setIsWeChatSubmitting(true)
-    try {
-      const res = await wechatLoginByCode(wechatCode)
-      if (res?.success) {
-        await handleLoginSuccess(res.data as { id?: number } | null)
-        toast.success(t('Signed in via WeChat'))
-        handleWeChatDialogChange(false)
-      } else {
-        toast.error(res?.message || t('Login failed'))
-      }
-    } catch (_error) {
-      toast.error(t('Login failed'))
-    } finally {
-      setIsWeChatSubmitting(false)
-    }
-  }
-
   return (
     <Form {...form}>
       <form
@@ -229,6 +272,33 @@ export function SignUpForm({
         className={cn('grid gap-4', className)}
         {...props}
       >
+        {smsRegisterEnabled && (
+          <div className='bg-muted/40 grid grid-cols-2 gap-2 rounded-lg border p-1'>
+            <Button
+              type='button'
+              size='sm'
+              variant={isSmsRegisterMode ? 'ghost' : 'default'}
+              onClick={() => handleRegisterModeChange('username')}
+            >
+              {t('Username registration')}
+            </Button>
+            <Button
+              type='button'
+              size='sm'
+              variant={isSmsRegisterMode ? 'default' : 'ghost'}
+              className={cn(
+                'transition-colors',
+                isSmsRegisterMode
+                  ? 'border border-emerald-300 bg-emerald-100 text-emerald-800 hover:bg-emerald-100'
+                  : 'text-muted-foreground'
+              )}
+              onClick={() => handleRegisterModeChange('sms')}
+            >
+              {t('Phone registration')}
+            </Button>
+          </div>
+        )}
+
         {/* Username Field */}
         <FormField
           control={form.control}
@@ -276,6 +346,59 @@ export function SignUpForm({
             </FormItem>
           )}
         />
+
+        {isSmsRegisterMode && (
+          <>
+            <FormField
+              control={form.control}
+              name='phone'
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>{t('Phone number')}</FormLabel>
+                  <FormControl>
+                    <Input
+                      placeholder={t('Enter your phone number')}
+                      autoComplete='tel'
+                      {...field}
+                    />
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <div className='flex items-end gap-2'>
+              <div className='flex-1'>
+                <Input
+                  placeholder={t('SMS verification code')}
+                  value={smsVerificationCode}
+                  onChange={(e) => setSmsVerificationCode(e.target.value)}
+                  autoComplete='one-time-code'
+                />
+              </div>
+              <Button
+                variant='outline'
+                type='button'
+                disabled={
+                  isLoading ||
+                  isSendingSmsCode ||
+                  isSmsCountdownActive ||
+                  !phoneValue ||
+                  !turnstileReady
+                }
+                onClick={handleSendSmsVerificationCode}
+              >
+                {isSmsCountdownActive ? (
+                  t('Resend ({{seconds}}s)', { seconds: smsSecondsLeft })
+                ) : isSendingSmsCode ? (
+                  <Loader2 className='h-4 w-4 animate-spin' />
+                ) : (
+                  t('Send SMS code')
+                )}
+              </Button>
+            </div>
+          </>
+        )}
 
         {/* Email Verification Section */}
         {emailVerificationRequired && (
@@ -370,76 +493,20 @@ export function SignUpForm({
             status={status}
             disabled={isLoading || (requiresLegalConsent && !agreedToLegal)}
             onWeChatLogin={hasWeChatLogin ? handleOpenWeChatDialog : undefined}
-            isWeChatLoading={isWeChatSubmitting}
+            isWeChatLoading={isWeChatDialogOpen}
             className='pt-2'
           />
         )}
       </form>
 
       {hasWeChatLogin && (
-        <Dialog
+        <WeChatLoginDialog
           open={isWeChatDialogOpen}
-          onOpenChange={handleWeChatDialogChange}
-          title={t('WeChat sign in')}
-          description={t(
-            'Scan the QR code to follow the official account and reply with “验证码” to receive your verification code.'
-          )}
-          contentClassName='max-w-sm'
-          headerClassName='text-left'
-          contentHeight='auto'
-          bodyClassName='space-y-4'
-          footer={
-            <>
-              <Button
-                type='button'
-                variant='outline'
-                onClick={() => handleWeChatDialogChange(false)}
-                disabled={isWeChatSubmitting}
-              >
-                {t('Cancel')}
-              </Button>
-              <Button
-                type='button'
-                onClick={handleWeChatLogin}
-                disabled={
-                  isWeChatSubmitting ||
-                  !wechatCode.trim() ||
-                  (requiresLegalConsent && !agreedToLegal)
-                }
-                className='gap-2'
-              >
-                {isWeChatSubmitting ? (
-                  <Loader2 className='h-4 w-4 animate-spin' />
-                ) : null}
-                {t('Confirm')}
-              </Button>
-            </>
-          }
-        >
-          {wechatQrCodeUrl ? (
-            <div className='flex justify-center'>
-              <img
-                src={wechatQrCodeUrl}
-                alt={t('WeChat login QR code')}
-                className='h-40 w-40 rounded-md border object-contain'
-              />
-            </div>
-          ) : (
-            <p className='text-muted-foreground text-sm'>
-              {t('QR code is not configured. Please contact support.')}
-            </p>
-          )}
-          <div className='grid gap-2'>
-            <Label htmlFor='wechat-code'>{t('Verification code')}</Label>
-            <Input
-              id='wechat-code'
-              placeholder={t('Enter the verification code')}
-              value={wechatCode}
-              onChange={(event) => setWeChatCode(event.target.value)}
-              autoComplete='one-time-code'
-            />
-          </div>
-        </Dialog>
+          onOpenChange={setIsWeChatDialogOpen}
+          affCode={getAffiliateCode() || undefined}
+          onLoginSuccess={(data) => handleLoginSuccess(data)}
+          onRequire2FA={redirectTo2FA}
+        />
       )}
     </Form>
   )

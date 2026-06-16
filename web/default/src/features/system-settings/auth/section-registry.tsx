@@ -23,6 +23,7 @@ import { BotProtectionSection } from './bot-protection-section'
 import { CustomOAuthSection } from './custom-oauth/custom-oauth-section'
 import { OAuthSection } from './oauth-section'
 import { PasskeySection } from './passkey-section'
+import { SmsSettingsSection } from './sms-settings-section'
 
 const AUTH_SECTIONS = [
   {
@@ -33,6 +34,8 @@ const AUTH_SECTIONS = [
         defaultValues={{
           PasswordLoginEnabled: settings.PasswordLoginEnabled,
           PasswordRegisterEnabled: settings.PasswordRegisterEnabled,
+          SMSLoginEnabled: settings.SMSLoginEnabled,
+          SMSRegisterEnabled: settings.SMSRegisterEnabled,
           EmailVerificationEnabled: settings.EmailVerificationEnabled,
           RegisterEnabled: settings.RegisterEnabled,
           EmailDomainRestrictionEnabled: settings.EmailDomainRestrictionEnabled,
@@ -73,6 +76,14 @@ const AUTH_SECTIONS = [
           WeChatServerAddress: settings.WeChatServerAddress,
           WeChatServerToken: settings.WeChatServerToken,
           WeChatAccountQRCodeImageURL: settings.WeChatAccountQRCodeImageURL,
+          WeChatCodeLoginEnabled: settings.WeChatCodeLoginEnabled,
+          WeChatScanLoginEnabled: settings.WeChatScanLoginEnabled,
+          WeChatDefaultLoginMethod: settings.WeChatDefaultLoginMethod,
+          WeChatScanLoginPollIntervalSeconds:
+            settings.WeChatScanLoginPollIntervalSeconds,
+          WeChatScanLoginTimeoutSeconds: settings.WeChatScanLoginTimeoutSeconds,
+          WeChatScanLoginCreateIntervalSecondsPerIP:
+            settings.WeChatScanLoginCreateIntervalSecondsPerIP,
         }}
       />
     ),
@@ -116,6 +127,36 @@ const AUTH_SECTIONS = [
     id: 'custom-oauth',
     titleKey: 'Custom OAuth',
     build: () => <CustomOAuthSection />,
+  },
+  {
+    id: 'sms',
+    titleKey: 'SMS Settings',
+    build: (settings: AuthSettings) => (
+      <SmsSettingsSection
+        defaultValues={{
+          SMSEnabled: settings.SMSEnabled,
+          SMSProvider: settings.SMSProvider,
+          SMSBaoEndpoint: settings.SMSBaoEndpoint,
+          SMSBaoQueryEndpoint: settings.SMSBaoQueryEndpoint,
+          SMSBaoUsername: settings.SMSBaoUsername,
+          SMSBaoCredential: settings.SMSBaoCredential,
+          SMSBaoCredentialMode: settings.SMSBaoCredentialMode,
+          SMSBaoProductID: settings.SMSBaoProductID,
+          SMSCodeValidMinutes: settings.SMSCodeValidMinutes,
+          SMSCodeCooldownSeconds: settings.SMSCodeCooldownSeconds,
+          SMSSignature: settings.SMSSignature,
+          SMSSignatureReviewStatus: settings.SMSSignatureReviewStatus,
+          SMSProductName: settings.SMSProductName,
+          SMSTemplate: settings.SMSTemplate,
+          SMSRateLimitEnabled: settings.SMSRateLimitEnabled,
+          SMSRateLimitWindowSeconds: settings.SMSRateLimitWindowSeconds,
+          SMSRateLimitPhoneCount: settings.SMSRateLimitPhoneCount,
+          SMSRateLimitIPCount: settings.SMSRateLimitIPCount,
+          SMSRateLimitAccountCount: settings.SMSRateLimitAccountCount,
+          SMSRateLimitSceneCount: settings.SMSRateLimitSceneCount,
+        }}
+      />
+    ),
   },
 ] as const
 

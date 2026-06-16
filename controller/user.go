@@ -65,6 +65,10 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	setupLoginWithOptionalTwoFA(&user, c)
+}
+
+func setupLoginWithOptionalTwoFA(user *model.User, c *gin.Context) {
 	// 检查是否启用2FA
 	if model.IsTwoFAEnabled(user.Id) {
 		// 设置pending session，等待2FA验证
@@ -87,7 +91,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	setupLogin(&user, c)
+	setupLogin(user, c)
 }
 
 // loginMethodFromContext 根据请求路径推导登录方式，用于登录审计日志。
@@ -101,6 +105,8 @@ func loginMethodFromContext(c *gin.Context) string {
 		return "passkey"
 	case "/api/oauth/wechat":
 		return "wechat"
+	case "/api/oauth/wechat/login/status":
+		return "wechat_scan"
 	case "/api/oauth/telegram/login":
 		return "telegram"
 	case "/api/oauth/:provider":
@@ -213,7 +219,18 @@ func Register(c *gin.Context) {
 		return
 	}
 	affCode := user.AffCode // this code is the inviter's code, not the user's own code
-	inviterId, _ := model.GetUserIdByAffCode(affCode)
+	inviteCtx, err := resolveAffiliateInviteContextForRegistration(model.DB, affiliateRegistrationAttributionInput{
+		InviteCode:     affCode,
+		RegisterMethod: service.AffiliateRegisterMethodPassword,
+	})
+	if err != nil {
+		common.ApiError(c, err)
+		return
+	}
+	inviterId := 0
+	if inviteCtx != nil {
+		inviterId = inviteCtx.InviterUserId
+	}
 	cleanUser := model.User{
 		Username:    user.Username,
 		Password:    user.Password,
@@ -224,7 +241,9 @@ func Register(c *gin.Context) {
 	if common.EmailVerificationEnabled {
 		cleanUser.Email = user.Email
 	}
-	if err := cleanUser.Insert(inviterId); err != nil {
+	inviteeQuota := affiliateInviteeQuotaForContext(inviteCtx)
+	inviterQuota := affiliateInviterQuotaForContext(inviteCtx)
+	if err := cleanUser.InsertWithInviteQuotas(inviterId, inviteeQuota, inviterQuota); err != nil {
 		common.ApiError(c, err)
 		return
 	}
@@ -233,6 +252,14 @@ func Register(c *gin.Context) {
 	var insertedUser model.User
 	if err := model.DB.Where("username = ?", cleanUser.Username).First(&insertedUser).Error; err != nil {
 		common.ApiErrorI18n(c, i18n.MsgUserRegisterFailed)
+		return
+	}
+	if _, err := recordAffiliateInviteAttributionForRegistration(model.DB, inviteCtx, affiliateRegistrationAttributionInput{
+		InviteeUserId:  insertedUser.Id,
+		RegisterMethod: service.AffiliateRegisterMethodPassword,
+		InitialQuota:   affiliateInviteInitialQuotaForContext(inviteCtx),
+	}); err != nil {
+		common.ApiError(c, err)
 		return
 	}
 	// 生成默认令牌
@@ -529,6 +556,7 @@ func generateDefaultSidebarConfig(userRole int) string {
 		"detail":     true,
 		"token":      true,
 		"log":        true,
+		"affiliate":  true,
 		"midjourney": true,
 		"task":       true,
 	}

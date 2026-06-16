@@ -84,6 +84,7 @@ func GetOptions(c *gin.Context) {
 		isSensitiveKey := strings.HasSuffix(k, "Token") ||
 			strings.HasSuffix(k, "Secret") ||
 			strings.HasSuffix(k, "Key") ||
+			strings.HasSuffix(k, "Credential") ||
 			strings.HasSuffix(k, "secret") ||
 			strings.HasSuffix(k, "api_key")
 		if isSensitiveKey {
@@ -138,7 +139,7 @@ func UpdateOption(c *gin.Context) {
 		option.Value = fmt.Sprintf("%v", option.Value)
 	}
 	switch option.Key {
-	case "QuotaForInviter", "QuotaForInvitee":
+	case "QuotaForInviter", "QuotaForInvitee", "AffiliateQuotaForInvitee", "AffiliateLevelOneQuotaForInvitee", "AffiliateLevelTwoQuotaForInvitee", "AffiliateLevelOneQuotaForInviter", "AffiliateLevelTwoQuotaForInviter":
 		if isPositiveOptionValue(option.Value.(string)) && !operation_setting.IsPaymentComplianceConfirmed() {
 			common.ApiErrorI18n(c, i18n.MsgPaymentComplianceRequired)
 			return

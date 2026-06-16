@@ -9,6 +9,7 @@ import (
 	"github.com/QuantumNous/new-api/i18n"
 	"github.com/QuantumNous/new-api/model"
 	"github.com/QuantumNous/new-api/oauth"
+	"github.com/QuantumNous/new-api/service"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 	"gorm.io/gorm"
@@ -263,17 +264,28 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 	user.Status = common.UserStatusEnabled
 
 	// Handle affiliate code
-	affCode := session.Get("aff")
-	inviterId := 0
-	if affCode != nil {
-		inviterId, _ = model.GetUserIdByAffCode(affCode.(string))
+	providerKey := affiliateOAuthProviderKey(provider.GetProviderPrefix())
+	inviteCtx, err := resolveAffiliateInviteContextForRegistration(model.DB, affiliateRegistrationAttributionInput{
+		InviteCode:     affiliateInviteCodeFromSessionValue(session.Get("aff")),
+		RegisterMethod: service.AffiliateRegisterMethodOAuth,
+		Provider:       providerKey,
+	})
+	if err != nil {
+		return nil, err
 	}
+	inviterId := 0
+	if inviteCtx != nil {
+		inviterId = inviteCtx.InviterUserId
+	}
+	inviteeQuota := affiliateInviteeQuotaForContext(inviteCtx)
+	inviterQuota := affiliateInviterQuotaForContext(inviteCtx)
 
 	// Use transaction to ensure user creation and OAuth binding are atomic
 	if genericProvider, ok := provider.(*oauth.GenericOAuthProvider); ok {
 		// Custom provider: create user and binding in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
 			// Create user
+			user.InviterId = inviterId
 			if err := user.InsertWithTx(tx, inviterId); err != nil {
 				return err
 			}
@@ -295,11 +307,12 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		}
 
 		// Perform post-transaction tasks (logs, sidebar config, inviter rewards)
-		user.FinalizeOAuthUserCreation(inviterId)
+		user.FinalizeOAuthUserCreationWithInviteQuotas(inviterId, inviteeQuota, inviterQuota)
 	} else {
 		// Built-in provider: create user and update provider ID in a transaction
 		err := model.DB.Transaction(func(tx *gorm.DB) error {
 			// Create user
+			user.InviterId = inviterId
 			if err := user.InsertWithTx(tx, inviterId); err != nil {
 				return err
 			}
@@ -324,7 +337,15 @@ func findOrCreateOAuthUser(c *gin.Context, provider oauth.Provider, oauthUser *o
 		}
 
 		// Perform post-transaction tasks
-		user.FinalizeOAuthUserCreation(inviterId)
+		user.FinalizeOAuthUserCreationWithInviteQuotas(inviterId, inviteeQuota, inviterQuota)
+	}
+	if _, err := recordAffiliateInviteAttributionForRegistration(model.DB, inviteCtx, affiliateRegistrationAttributionInput{
+		InviteeUserId:  user.Id,
+		RegisterMethod: service.AffiliateRegisterMethodOAuth,
+		Provider:       providerKey,
+		InitialQuota:   affiliateInviteInitialQuotaForContext(inviteCtx),
+	}); err != nil {
+		return nil, err
 	}
 
 	return user, nil

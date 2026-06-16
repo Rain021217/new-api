@@ -2,8 +2,8 @@
 #
 # Usage:
 #   1. docker compose -f docker-compose.dev.yml up -d
-#   2. cd web && bun install && bun run dev
-#   3. Open http://localhost:3001 (Rsbuild dev server, API auto-proxied to :3000)
+#   2. ./scripts/dev-web-tmux.sh
+#   3. Open http://localhost:5173 (default) or http://localhost:5174 (classic)
 #
 # Rebuild backend after Go code changes:
 #   docker compose -f docker-compose.dev.yml up -d --build new-api
@@ -19,13 +19,13 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.dev
-    image: new-api-dev:local
-    container_name: new-api-dev
+    image: new-api:dev
+    container_name: new-api
     restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
-      - dev_data:/data
+      - new_api_dev_data:/data
     environment:
       - SQL_DSN=postgresql://root:123456@postgres:5432/new-api
       - REDIS_CONN_STRING=redis://redis
@@ -37,27 +37,27 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - dev-network
+      - new-api-dev-network
 
   redis:
-    image: redis:7-alpine
-    container_name: new-api-dev-redis
+    image: redis:latest
+    container_name: new-api-redis
     restart: unless-stopped
     networks:
-      - dev-network
+      - new-api-dev-network
 
   postgres:
-    image: postgres:15-alpine
-    container_name: new-api-dev-pg
+    image: postgres:latest
+    container_name: new-api-postgres
     restart: unless-stopped
     environment:
       POSTGRES_USER: root
       POSTGRES_PASSWORD: 123456
       POSTGRES_DB: new-api
     volumes:
-      - dev_pg_data:/var/lib/postgresql/data
+      - new_api_dev_pg_data:/var/lib/postgresql
     networks:
-      - dev-network
+      - new-api-dev-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U root -d new-api"]
       interval: 5s
@@ -65,9 +65,9 @@ services:
       retries: 5
 
 volumes:
-  dev_data:
-  dev_pg_data:
+  new_api_dev_data:
+  new_api_dev_pg_data:
 
 networks:
-  dev-network:
+  new-api-dev-network:
     driver: bridge

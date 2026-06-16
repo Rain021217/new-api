@@ -18,6 +18,39 @@ description: >-
 - Sync script: `bun run i18n:sync` (from `web/default/`)
 - All `t()` calls must have corresponding keys in every locale file
 
+## Completeness check (CI validator)
+
+Each theme ships a missing-key validator that fails CI when a literal `t('...')`
+key used in components is absent from any locale file (the recurring gap, e.g.
+a whole component's key set missing from every locale):
+
+- `web/default/scripts/check-i18n.mjs` — default theme, ENGLISH-source keys,
+  locales `{en,zh,fr,ja,ru,vi}.json`.
+- `web/classic/scripts/check-i18n.mjs` — classic theme, CHINESE-source keys,
+  locales `{en,fr,ja,ru,vi,zh,zh-CN,zh-TW}.json`.
+
+Run from each theme root:
+
+```bash
+cd web/default && bun run i18n:check   # or: node scripts/check-i18n.mjs
+cd web/classic && bun run i18n:check   # or: node scripts/check-i18n.mjs
+```
+
+Behaviour:
+
+- Extracts every literal `t('...') / t("...") / t(`...`)` key (`\bt\(` regex, so
+  `API.put(` / `.get(` / `format(` are not matched). Auto-discovers all
+  `*.json` locales under `src/i18n/locales` and reads keys from the
+  `translation` namespace. i18next plural variants (`key_one`, `key_other`, …)
+  satisfy a `t('key')` usage.
+- Reports each missing key grouped by locale with the source file(s), prints a
+  per-locale count and a final summary, and exits non-zero if anything is
+  missing (exit 0 when complete).
+- MISSING-KEY only — it does NOT flag value===key "untranslated" entries (too
+  many legitimate brand/cognate cases: OAuth, Passkey, Section, 名称, …).
+- Limitation: dynamically-built keys — `t(`...${x}...`)` and computed strings —
+  are not statically extracted and therefore not validated.
+
 ## Workflow
 
 ### Step 1: Run sync and read report

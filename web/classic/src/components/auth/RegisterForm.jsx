@@ -41,6 +41,8 @@ import {
   Form,
   Icon,
   Modal,
+  TabPane,
+  Tabs,
 } from '@douyinfe/semi-ui';
 import Title from '@douyinfe/semi-ui/lib/es/typography/title';
 import Text from '@douyinfe/semi-ui/lib/es/typography/text';
@@ -59,11 +61,17 @@ import {
 import OIDCIcon from '../common/logo/OIDCIcon';
 import LinuxDoIcon from '../common/logo/LinuxDoIcon';
 import WeChatIcon from '../common/logo/WeChatIcon';
+import TwoFAVerification from './TwoFAVerification';
+import WeChatScanLoginModal from './WeChatScanLoginModal';
 import TelegramLoginButton from 'react-telegram-login/src';
 import { UserContext } from '../../context/User';
 import { StatusContext } from '../../context/Status';
 import { useTranslation } from 'react-i18next';
 import { SiDiscord } from 'react-icons/si';
+import {
+  buildSmsRegisterCodeRequest,
+  buildSmsRegisterRequest,
+} from './smsRegisterRequest.js';
 
 const RegisterForm = () => {
   let navigate = useNavigate();
@@ -78,7 +86,9 @@ const RegisterForm = () => {
     password: '',
     password2: '',
     email: '',
+    phone: '',
     verification_code: '',
+    sms_verification_code: '',
     wechat_verification_code: '',
   });
   const { username, password, password2 } = inputs;
@@ -88,6 +98,10 @@ const RegisterForm = () => {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
   const [turnstileToken, setTurnstileToken] = useState('');
   const [showWeChatLoginModal, setShowWeChatLoginModal] = useState(false);
+  const [showWeChatScanModal, setShowWeChatScanModal] = useState(false);
+  const [showWeChatChooser, setShowWeChatChooser] = useState(false);
+  const [wechatChooserTab, setWechatChooserTab] = useState('scan');
+  const [showTwoFA, setShowTwoFA] = useState(false);
   const [showEmailRegister, setShowEmailRegister] = useState(false);
   const [wechatLoading, setWechatLoading] = useState(false);
   const [githubLoading, setGithubLoading] = useState(false);
@@ -95,6 +109,7 @@ const RegisterForm = () => {
   const [oidcLoading, setOidcLoading] = useState(false);
   const [linuxdoLoading, setLinuxdoLoading] = useState(false);
   const [emailRegisterLoading, setEmailRegisterLoading] = useState(false);
+  const [smsRegisterLoading, setSmsRegisterLoading] = useState(false);
   const [registerLoading, setRegisterLoading] = useState(false);
   const [verificationCodeLoading, setVerificationCodeLoading] = useState(false);
   const [otherRegisterOptionsLoading, setOtherRegisterOptionsLoading] =
@@ -108,6 +123,7 @@ const RegisterForm = () => {
   const [hasPrivacyPolicy, setHasPrivacyPolicy] = useState(false);
   const [githubButtonState, setGithubButtonState] = useState('idle');
   const [githubButtonDisabled, setGithubButtonDisabled] = useState(false);
+  const [showSmsRegister, setShowSmsRegister] = useState(false);
   const githubTimeoutRef = useRef(null);
   const githubButtonText = t(githubButtonTextKeyByState[githubButtonState]);
 
@@ -129,17 +145,33 @@ const RegisterForm = () => {
       return {};
     }
   }, [statusState?.status]);
+  const smsRegisterEnabled = Boolean(
+    status.sms_enabled ?? status.data?.sms_enabled,
+  );
+  // WeChat method tunables (fall back to the legacy umbrella flag when the
+  // new tunables are not present on /api/status yet).
+  const wechatScanLoginEnabled = Boolean(
+    status.wechat_scan_login_enabled ?? status.wechat_login,
+  );
+  const wechatCodeLoginEnabled = Boolean(
+    status.wechat_code_login_enabled ?? status.wechat_login,
+  );
+  const wechatLoginEnabled =
+    wechatScanLoginEnabled || wechatCodeLoginEnabled || Boolean(status.wechat_login);
+  const wechatDefaultMethod =
+    status.wechat_login_default_method === 'code' ? 'code' : 'scan';
   const hasCustomOAuthProviders =
     (status.custom_oauth_providers || []).length > 0;
-  const hasOAuthRegisterOptions = Boolean(
-    status.github_oauth ||
-      status.discord_oauth ||
-      status.oidc_enabled ||
-      status.wechat_login ||
-      status.linuxdo_oauth ||
-      status.telegram_oauth ||
-      hasCustomOAuthProviders,
-  );
+  const hasOAuthRegisterOptions = [
+    status.github_oauth,
+    status.discord_oauth,
+    status.oidc_enabled,
+    wechatLoginEnabled,
+    status.linuxdo_oauth,
+    status.telegram_oauth,
+    smsRegisterEnabled,
+    hasCustomOAuthProviders,
+  ].some(Boolean);
 
   const [showEmailVerification, setShowEmailVerification] = useState(false);
 
@@ -178,13 +210,64 @@ const RegisterForm = () => {
 
   const onWeChatLoginClicked = () => {
     setWechatLoading(true);
-    setShowWeChatLoginModal(true);
+    // Route to the correct surface based on which methods are enabled.
+    // - both enabled: open the chooser modal (Tabs)
+    // - scan only:    open the scan-login modal directly
+    // - code only:    open the legacy verification-code modal directly
+    if (wechatScanLoginEnabled && wechatCodeLoginEnabled) {
+      setWechatChooserTab(wechatDefaultMethod);
+      setShowWeChatChooser(true);
+    } else if (wechatScanLoginEnabled) {
+      setShowWeChatScanModal(true);
+    } else if (wechatCodeLoginEnabled) {
+      setShowWeChatLoginModal(true);
+    }
     setWechatLoading(false);
+  };
+
+  // Hand off from the chooser into the matching modal.
+  const openWeChatMethod = (method) => {
+    setShowWeChatChooser(false);
+    if (method === 'code') {
+      setShowWeChatLoginModal(true);
+    } else {
+      setShowWeChatScanModal(true);
+    }
+  };
+
+  // 微信扫码登录成功：复用与微信验证码登录一致的成功流程
+  const handleWeChatScanSuccess = (data) => {
+    userDispatch({ type: 'login', payload: data });
+    localStorage.setItem('user', JSON.stringify(data));
+    setUserData(data);
+    updateAPI();
+    navigate('/');
+  };
+
+  // 微信扫码登录需要两步验证：复用现有 2FA 流程
+  const handleWeChatScanRequire2FA = () => {
+    setShowWeChatScanModal(false);
+    setShowTwoFA(true);
+  };
+
+  // 2FA 验证成功处理
+  const handle2FASuccess = (data) => {
+    userDispatch({ type: 'login', payload: data });
+    localStorage.setItem('user', JSON.stringify(data));
+    setUserData(data);
+    updateAPI();
+    showSuccess(t('登录成功！'));
+    navigate('/');
+  };
+
+  // 返回（关闭 2FA 弹窗）
+  const handleBackFrom2FA = () => {
+    setShowTwoFA(false);
   };
 
   const onSubmitWeChatVerificationCode = async () => {
     if (turnstileEnabled && turnstileToken === '') {
-      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
     setWechatCodeSubmitLoading(true);
@@ -199,13 +282,13 @@ const RegisterForm = () => {
         setUserData(data);
         updateAPI();
         navigate('/');
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         setShowWeChatLoginModal(false);
       } else {
         showError(message);
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     } finally {
       setWechatCodeSubmitLoading(false);
     }
@@ -217,16 +300,26 @@ const RegisterForm = () => {
 
   async function handleSubmit(e) {
     if (password.length < 8) {
-      showInfo('密码长度不得小于 8 位！');
+      showInfo(t('密码长度不得小于 8 位！'));
       return;
     }
     if (password !== password2) {
       showInfo('两次输入的密码不一致');
       return;
     }
+    if (showSmsRegister) {
+      if (!inputs.phone) {
+        showInfo(t('请输入手机号'));
+        return;
+      }
+      if (!inputs.sms_verification_code) {
+        showInfo(t('请输入短信验证码'));
+        return;
+      }
+    }
     if (username && password) {
       if (turnstileEnabled && turnstileToken === '') {
-        showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+        showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
         return;
       }
       setRegisterLoading(true);
@@ -234,30 +327,71 @@ const RegisterForm = () => {
         if (!affCode) {
           affCode = localStorage.getItem('aff');
         }
-        inputs.aff_code = affCode;
-        const res = await API.post(
-          `/api/user/register?turnstile=${turnstileToken}`,
-          inputs,
-        );
+        const request = showSmsRegister
+          ? buildSmsRegisterRequest({
+              username,
+              password,
+              phone: inputs.phone,
+              verificationCode: inputs.sms_verification_code,
+              affCode,
+              turnstileToken,
+            })
+          : {
+              url: '/api/user/register',
+              data: {
+                ...inputs,
+                aff_code: affCode,
+              },
+              config: {
+                params: {
+                  turnstile: turnstileToken,
+                },
+              },
+            };
+        const res = await API.post(request.url, request.data, request.config);
         const { success, message } = res.data;
         if (success) {
           navigate('/login');
-          showSuccess('注册成功！');
+          showSuccess(t('注册成功！'));
         } else {
           showError(message);
         }
       } catch (error) {
-        showError('注册失败，请重试');
+        showError(t('注册失败，请重试'));
       } finally {
         setRegisterLoading(false);
       }
     }
   }
 
+  const sendSmsVerificationCode = async () => {
+    if (inputs.phone === '') return;
+    if (turnstileEnabled && turnstileToken === '') {
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
+      return;
+    }
+    setVerificationCodeLoading(true);
+    try {
+      const request = buildSmsRegisterCodeRequest(inputs.phone, turnstileToken);
+      const res = await API.post(request.url, request.data, request.config);
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('验证码发送成功，请检查短信！'));
+        setDisableButton(true);
+      } else {
+        showError(message);
+      }
+    } catch (error) {
+      showError(t('发送验证码失败，请重试'));
+    } finally {
+      setVerificationCodeLoading(false);
+    }
+  };
+
   const sendVerificationCode = async () => {
     if (inputs.email === '') return;
     if (turnstileEnabled && turnstileToken === '') {
-      showInfo('请稍后几秒重试，Turnstile 正在检查用户环境！');
+      showInfo(t('请稍后几秒重试，Turnstile 正在检查用户环境！'));
       return;
     }
     setVerificationCodeLoading(true);
@@ -267,13 +401,13 @@ const RegisterForm = () => {
       );
       const { success, message } = res.data;
       if (success) {
-        showSuccess('验证码发送成功，请检查你的邮箱！');
+        showSuccess(t('验证码发送成功，请检查你的邮箱！'));
         setDisableButton(true); // 发送成功后禁用按钮，开始倒计时
       } else {
         showError(message);
       }
     } catch (error) {
-      showError('发送验证码失败，请重试');
+      showError(t('发送验证码失败，请重试'));
     } finally {
       setVerificationCodeLoading(false);
     }
@@ -347,12 +481,21 @@ const RegisterForm = () => {
   const handleEmailRegisterClick = () => {
     setEmailRegisterLoading(true);
     setShowEmailRegister(true);
+    setShowSmsRegister(false);
     setEmailRegisterLoading(false);
+  };
+
+  const handleSmsRegisterClick = () => {
+    setSmsRegisterLoading(true);
+    setShowEmailRegister(true);
+    setShowSmsRegister(true);
+    setSmsRegisterLoading(false);
   };
 
   const handleOtherRegisterOptionsClick = () => {
     setOtherRegisterOptionsLoading(true);
     setShowEmailRegister(false);
+    setShowSmsRegister(false);
     setOtherRegisterOptionsLoading(false);
   };
 
@@ -379,7 +522,7 @@ const RegisterForm = () => {
       if (success) {
         userDispatch({ type: 'login', payload: data });
         localStorage.setItem('user', JSON.stringify(data));
-        showSuccess('登录成功！');
+        showSuccess(t('登录成功！'));
         setUserData(data);
         updateAPI();
         navigate('/');
@@ -387,7 +530,7 @@ const RegisterForm = () => {
         showError(message);
       }
     } catch (error) {
-      showError('登录失败，请重试');
+      showError(t('登录失败，请重试'));
     }
   };
 
@@ -410,7 +553,7 @@ const RegisterForm = () => {
             </div>
             <div className='px-2 py-8'>
               <div className='space-y-3'>
-                {status.wechat_login && (
+                {wechatLoginEnabled && (
                   <Button
                     theme='outline'
                     className='w-full h-12 flex items-center justify-center !rounded-full border border-gray-200 hover:bg-gray-50 transition-colors'
@@ -534,6 +677,24 @@ const RegisterForm = () => {
                 >
                   <span className='ml-3'>{t('使用 用户名 注册')}</span>
                 </Button>
+
+                {smsRegisterEnabled && (
+                  <Button
+                    theme='outline'
+                    type='tertiary'
+                    className='w-full h-12 flex items-center justify-center !rounded-full !border !border-emerald-300 !bg-emerald-50 !text-emerald-700 hover:!bg-emerald-100 transition-colors'
+                    style={{
+                      backgroundColor: '#ecfdf5',
+                      borderColor: '#6ee7b7',
+                      color: '#047857',
+                    }}
+                    icon={<IconUser size='large' />}
+                    onClick={handleSmsRegisterClick}
+                    loading={smsRegisterLoading}
+                  >
+                    <span className='ml-3'>{t('使用 手机号 注册')}</span>
+                  </Button>
+                )}
               </div>
 
               <div className='mt-6 text-center text-sm'>
@@ -602,7 +763,39 @@ const RegisterForm = () => {
                   prefix={<IconLock />}
                 />
 
-                {showEmailVerification && (
+                {showSmsRegister ? (
+                  <>
+                    <Form.Input
+                      field='phone'
+                      label={t('手机号')}
+                      placeholder={t('输入手机号')}
+                      name='phone'
+                      onChange={(value) => handleChange('phone', value)}
+                      prefix={<IconUser />}
+                      suffix={
+                        <Button
+                          onClick={sendSmsVerificationCode}
+                          loading={verificationCodeLoading}
+                          disabled={disableButton || verificationCodeLoading}
+                        >
+                          {disableButton
+                            ? `${t('重新发送')} (${countdown})`
+                            : t('获取验证码')}
+                        </Button>
+                      }
+                    />
+                    <Form.Input
+                      field='sms_verification_code'
+                      label={t('短信验证码')}
+                      placeholder={t('输入短信验证码')}
+                      name='sms_verification_code'
+                      onChange={(value) =>
+                        handleChange('sms_verification_code', value)
+                      }
+                      prefix={<IconKey />}
+                    />
+                  </>
+                ) : showEmailVerification ? (
                   <>
                     <Form.Input
                       field='email'
@@ -635,7 +828,7 @@ const RegisterForm = () => {
                       prefix={<IconKey />}
                     />
                   </>
-                )}
+                ) : null}
 
                 {(hasUserAgreement || hasPrivacyPolicy) && (
                   <div className='pt-4'>
@@ -730,6 +923,57 @@ const RegisterForm = () => {
     );
   };
 
+  // 微信登录方式选择弹窗（扫码 / 验证码 二选一）
+  const renderWeChatChooserModal = () => {
+    if (!wechatScanLoginEnabled || !wechatCodeLoginEnabled) {
+      return null;
+    }
+    return (
+      <Modal
+        title={t('微信登录')}
+        visible={showWeChatChooser}
+        onCancel={() => setShowWeChatChooser(false)}
+        footer={null}
+        centered
+      >
+        <Tabs
+          activeKey={wechatChooserTab}
+          onChange={setWechatChooserTab}
+          type='button'
+        >
+          <TabPane tab={t('扫码登录')} itemKey='scan'>
+            <div className='py-4 text-center'>
+              <p className='mb-4'>{t('打开微信扫描二维码登录')}</p>
+              <Button
+                theme='solid'
+                type='primary'
+                className='!rounded-full'
+                onClick={() => openWeChatMethod('scan')}
+              >
+                {t('打开扫码登录')}
+              </Button>
+            </div>
+          </TabPane>
+          <TabPane tab={t('验证码登录')} itemKey='code'>
+            <div className='py-4 text-center'>
+              <p className='mb-4'>
+                {t('微信扫码关注公众号，输入「验证码」获取验证码（三分钟内有效）')}
+              </p>
+              <Button
+                theme='solid'
+                type='primary'
+                className='!rounded-full'
+                onClick={() => openWeChatMethod('code')}
+              >
+                {t('打开验证码登录')}
+              </Button>
+            </div>
+          </TabPane>
+        </Tabs>
+      </Modal>
+    );
+  };
+
   const renderWeChatLoginModal = () => {
     return (
       <Modal
@@ -781,11 +1025,34 @@ const RegisterForm = () => {
         style={{ top: '50%', left: '-120px' }}
       />
       <div className='w-full max-w-sm mt-[60px]'>
-        {showEmailRegister ||
-        !hasOAuthRegisterOptions
+        {showEmailRegister || showSmsRegister || !hasOAuthRegisterOptions
           ? renderEmailRegisterForm()
           : renderOAuthOptions()}
         {renderWeChatLoginModal()}
+        {renderWeChatChooserModal()}
+        {wechatScanLoginEnabled && (
+          <WeChatScanLoginModal
+            visible={showWeChatScanModal}
+            onClose={() => setShowWeChatScanModal(false)}
+            affCode={(affCode || localStorage.getItem('aff')) || undefined}
+            onLoginSuccess={handleWeChatScanSuccess}
+            onRequire2FA={handleWeChatScanRequire2FA}
+          />
+        )}
+        <Modal
+          title={t('两步验证')}
+          visible={showTwoFA}
+          onCancel={handleBackFrom2FA}
+          footer={null}
+          width={450}
+          centered
+        >
+          <TwoFAVerification
+            onSuccess={handle2FASuccess}
+            onBack={handleBackFrom2FA}
+            isModal={true}
+          />
+        </Modal>
 
         {turnstileEnabled && (
           <div className='flex justify-center mt-6'>

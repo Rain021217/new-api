@@ -35,6 +35,11 @@ import {
   renderModelPriceSimple,
   renderTieredModelPriceSimple,
 } from '../../../helpers';
+import {
+  formatAffiliateRawQuota,
+  formatAffiliateRmbQuota,
+  readAffiliateRmbQuotaConfig,
+} from '../../../helpers/affiliateQuota';
 import { IconHelpCircle } from '@douyinfe/semi-icons';
 import { CircleAlert, Route, Sparkles } from 'lucide-react';
 
@@ -94,6 +99,25 @@ function buildChannelAffinityTooltip(affinity, t) {
   );
 }
 
+function renderAffiliateQuota(quota, t, digits = 6) {
+  const config = readAffiliateRmbQuotaConfig();
+  const rmb = formatAffiliateRmbQuota(quota, { ...config, digits });
+  const rawQuota = formatAffiliateRawQuota(quota);
+
+  return (
+    <Tooltip content={`${t('原始 quota')}：${rawQuota}`}>
+      <span>{rmb}</span>
+    </Tooltip>
+  );
+}
+
+function renderAffiliateQuotaText(quota, digits = 6) {
+  return formatAffiliateRmbQuota(quota, {
+    ...readAffiliateRmbQuotaConfig(),
+    digits,
+  });
+}
+
 // Render functions
 function renderType(type, t) {
   switch (type) {
@@ -144,10 +168,7 @@ function renderType(type, t) {
 
 function buildStreamStatusTooltip(ss, t) {
   if (!ss) return null;
-  const lines = [
-    t('流状态') + '：' + t('异常'),
-    (ss.end_reason || 'unknown'),
-  ];
+  const lines = [t('流状态') + '：' + t('异常'), ss.end_reason || 'unknown'];
   if (ss.error_count > 0) {
     lines.push(`${t('软错误')}: ${ss.error_count}`);
   }
@@ -185,11 +206,7 @@ function renderIsStream(bool, t, streamStatus) {
                 userSelect: 'none',
               }}
             >
-              <CircleAlert
-                size={14}
-                strokeWidth={2.5}
-                color='currentColor'
-              />
+              <CircleAlert size={14} strokeWidth={2.5} color='currentColor' />
             </span>
           </Tooltip>
         )}
@@ -461,7 +478,11 @@ function getUsageLogDetailSummary(record, text, billingDisplayMode, t) {
     };
   }
 
-  const summaryOpts = { ...other, displayMode: billingDisplayMode, outputMode: 'segments' };
+  const summaryOpts = {
+    ...other,
+    displayMode: billingDisplayMode,
+    outputMode: 'segments',
+  };
 
   if (other?.billing_mode === 'tiered_expr') {
     return { segments: renderTieredModelPriceSimple(summaryOpts) };
@@ -481,6 +502,7 @@ export const getLogsColumns = ({
   showUserInfoFunc,
   openChannelAffinityUsageCacheModal,
   isAdminUser,
+  isAffiliateScoped = false,
   billingDisplayMode = 'price',
 }) => {
   return [
@@ -518,7 +540,9 @@ export const getLogsColumns = ({
           }
         }
 
-        return isAdminUser &&
+        const canShowChannel = isAdminUser || isAffiliateScoped;
+
+        return canShowChannel &&
           (record.type === 0 ||
             record.type === 2 ||
             record.type === 5 ||
@@ -588,20 +612,23 @@ export const getLogsColumns = ({
       title: t('用户'),
       dataIndex: 'username',
       render: (text, record, index) => {
-        return isAdminUser ? (
+        const displayName = text || `#${record.user_id}`;
+        return isAdminUser || isAffiliateScoped ? (
           <div>
             <Avatar
               size='extra-small'
-              color={stringToColor(text)}
+              color={stringToColor(displayName)}
               style={{ marginRight: 4 }}
               onClick={(event) => {
                 event.stopPropagation();
-                showUserInfoFunc(record.user_id);
+                if (isAdminUser) {
+                  showUserInfoFunc(record.user_id);
+                }
               }}
             >
-              {typeof text === 'string' && text.slice(0, 1)}
+              {typeof displayName === 'string' && displayName.slice(0, 1)}
             </Avatar>
-            {text}
+            {displayName}
           </div>
         ) : (
           <></>
@@ -613,20 +640,25 @@ export const getLogsColumns = ({
       title: t('令牌'),
       dataIndex: 'token_name',
       render: (text, record, index) => {
-        return record.type === 0 ||
+        const tokenLabel =
+          text || (record.token_id ? `#${record.token_id}` : '-');
+        const canShowToken =
+          isAffiliateScoped ||
+          record.type === 0 ||
           record.type === 2 ||
           record.type === 5 ||
-          record.type === 6 ? (
+          record.type === 6;
+        return canShowToken ? (
           <div>
             <Tag
               color='grey'
               shape='circle'
               onClick={(event) => {
-                copyText(event, text);
+                copyText(event, tokenLabel);
               }}
             >
               {' '}
-              {t(text)}{' '}
+              {tokenLabel}{' '}
             </Tag>
           </div>
         ) : (
@@ -820,11 +852,22 @@ export const getLogsColumns = ({
         const isSubscription = other?.billing_source === 'subscription';
         if (isSubscription) {
           // Subscription billed: show only tag (no $0), but keep tooltip for equivalent cost.
+          const equivalentCost = isAffiliateScoped
+            ? renderAffiliateQuotaText(text, 6)
+            : renderQuota(text, 6);
+          const rawQuota = isAffiliateScoped
+            ? `；${t('原始 quota')}：${formatAffiliateRawQuota(text)}`
+            : '';
           return (
-            <Tooltip content={`${t('由订阅抵扣')}：${renderQuota(text, 6)}`}>
+            <Tooltip
+              content={`${t('由订阅抵扣')}：${equivalentCost}${rawQuota}`}
+            >
               <span>{renderBillingTag(record, t)}</span>
             </Tooltip>
           );
+        }
+        if (isAffiliateScoped) {
+          return <>{renderAffiliateQuota(text, t, 6)}</>;
         }
         return <>{renderQuota(text, 6)}</>;
       },

@@ -39,7 +39,7 @@ import {
   IconDelete,
 } from '@douyinfe/semi-icons';
 import { SiTelegram, SiWechat, SiLinux, SiDiscord } from 'react-icons/si';
-import { UserPlus, ShieldCheck } from 'lucide-react';
+import { UserPlus, ShieldCheck, Smartphone } from 'lucide-react';
 import TelegramLoginButton from 'react-telegram-login';
 import {
   API,
@@ -61,6 +61,7 @@ const AccountManagement = ({
   systemToken,
   setShowEmailBindModal,
   setShowWeChatBindModal,
+  setShowPhoneBindModal,
   generateAccessToken,
   handleSystemTokenClick,
   setShowChangePasswordModal,
@@ -234,6 +235,47 @@ const AccountManagement = ({
                   </div>
                 </div>
               </Card>
+
+              {/* 手机号绑定 */}
+              {status?.sms_enabled && (
+                <Card className='!rounded-xl'>
+                  <div className='flex items-center justify-between gap-3'>
+                    <div className='flex items-center flex-1 min-w-0'>
+                      <div className='w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center mr-3 flex-shrink-0'>
+                        <Smartphone
+                          size={20}
+                          className='text-slate-600 dark:text-slate-300'
+                        />
+                      </div>
+                      <div className='flex-1 min-w-0'>
+                        <div className='font-medium text-gray-900'>
+                          {t('手机号')}
+                        </div>
+                        <div className='text-sm text-gray-500 truncate'>
+                          {userState.user?.phone_masked
+                            ? renderAccountInfo(
+                                userState.user.phone_masked,
+                                t('手机号'),
+                              )
+                            : t('未绑定')}
+                        </div>
+                      </div>
+                    </div>
+                    <div className='flex-shrink-0'>
+                      <Button
+                        type='primary'
+                        theme='outline'
+                        size='small'
+                        onClick={() => setShowPhoneBindModal(true)}
+                      >
+                        {userState.user?.phone_masked
+                          ? t('修改绑定')
+                          : t('绑定')}
+                      </Button>
+                    </div>
+                  </div>
+                </Card>
+              )}
 
               {/* 微信绑定 */}
               <Card className='!rounded-xl'>

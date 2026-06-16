@@ -43,6 +43,7 @@ import {
 import axios from 'axios';
 import { useTranslation } from 'react-i18next';
 import CustomOAuthSetting from './CustomOAuthSetting';
+import SettingsSMS from '../../pages/Setting/Operation/SettingsSMS';
 
 const SystemSetting = () => {
   const { t } = useTranslation();
@@ -110,6 +111,18 @@ const SystemSetting = () => {
     'fetch_setting.ip_list': [],
     'fetch_setting.allowed_ports': [],
     'fetch_setting.apply_ip_filter_for_domain': true,
+    // SMS（验证码）配置 — 与 OAuth 类登录认证一起在系统设置面板中管理
+    SMSEnabled: false,
+    SMSRateLimitEnabled: false,
+    SMSLoginEnabled: true,
+    SMSRegisterEnabled: true,
+    // WeChat 扫码登录可调项
+    WeChatCodeLoginEnabled: true,
+    WeChatScanLoginEnabled: true,
+    WeChatDefaultLoginMethod: 'scan',
+    WeChatScanLoginPollIntervalSeconds: 2,
+    WeChatScanLoginTimeoutSeconds: 180,
+    WeChatScanLoginCreateIntervalSecondsPerIP: 2,
   });
 
   const [originInputs, setOriginInputs] = useState({});
@@ -190,8 +203,21 @@ const SystemSetting = () => {
           case 'passkey.enabled':
           case 'passkey.allow_insecure_origin':
           case 'WorkerAllowHttpImageRequestEnabled':
+          case 'SMSEnabled':
+          case 'SMSRateLimitEnabled':
+          case 'SMSLoginEnabled':
+          case 'SMSRegisterEnabled':
+          case 'WeChatCodeLoginEnabled':
+          case 'WeChatScanLoginEnabled':
             item.value = toBoolean(item.value);
             break;
+          case 'WeChatScanLoginPollIntervalSeconds':
+          case 'WeChatScanLoginTimeoutSeconds':
+          case 'WeChatScanLoginCreateIntervalSecondsPerIP': {
+            const parsed = parseInt(item.value, 10);
+            item.value = isNaN(parsed) ? 0 : parsed;
+            break;
+          }
           case 'passkey.origins':
             // origins是逗号分隔的字符串，直接使用
             item.value = item.value || '';
@@ -451,6 +477,42 @@ const SystemSetting = () => {
       options.push({
         key: 'WeChatServerToken',
         value: inputs.WeChatServerToken,
+      });
+    }
+    if (
+      originInputs['WeChatDefaultLoginMethod'] !==
+      inputs.WeChatDefaultLoginMethod
+    ) {
+      options.push({
+        key: 'WeChatDefaultLoginMethod',
+        value: inputs.WeChatDefaultLoginMethod || 'scan',
+      });
+    }
+    if (
+      originInputs['WeChatScanLoginPollIntervalSeconds'] !==
+      inputs.WeChatScanLoginPollIntervalSeconds
+    ) {
+      options.push({
+        key: 'WeChatScanLoginPollIntervalSeconds',
+        value: String(inputs.WeChatScanLoginPollIntervalSeconds ?? 2),
+      });
+    }
+    if (
+      originInputs['WeChatScanLoginTimeoutSeconds'] !==
+      inputs.WeChatScanLoginTimeoutSeconds
+    ) {
+      options.push({
+        key: 'WeChatScanLoginTimeoutSeconds',
+        value: String(inputs.WeChatScanLoginTimeoutSeconds ?? 180),
+      });
+    }
+    if (
+      originInputs['WeChatScanLoginCreateIntervalSecondsPerIP'] !==
+      inputs.WeChatScanLoginCreateIntervalSecondsPerIP
+    ) {
+      options.push({
+        key: 'WeChatScanLoginCreateIntervalSecondsPerIP',
+        value: String(inputs.WeChatScanLoginCreateIntervalSecondsPerIP ?? 2),
       });
     }
 
@@ -1007,6 +1069,24 @@ const SystemSetting = () => {
                         }
                       >
                         {t('允许通过密码进行注册')}
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='SMSLoginEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('SMSLoginEnabled', e)
+                        }
+                      >
+                        {t('允许通过手机号进行登录')}
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='SMSRegisterEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('SMSRegisterEnabled', e)
+                        }
+                      >
+                        {t('允许通过手机号进行注册')}
                       </Form.Checkbox>
                       <Form.Checkbox
                         field='EmailVerificationEnabled'
@@ -1575,6 +1655,73 @@ const SystemSetting = () => {
                       />
                     </Col>
                   </Row>
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                  >
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Checkbox
+                        field='WeChatCodeLoginEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('WeChatCodeLoginEnabled', e)
+                        }
+                      >
+                        {t('启用验证码登录（公众号回复验证码）')}
+                      </Form.Checkbox>
+                      <Form.Checkbox
+                        field='WeChatScanLoginEnabled'
+                        noLabel
+                        onChange={(e) =>
+                          handleCheckboxChange('WeChatScanLoginEnabled', e)
+                        }
+                      >
+                        {t('启用扫码登录（scene_id / login_token 流程）')}
+                      </Form.Checkbox>
+                    </Col>
+                    <Col xs={24} sm={24} md={12} lg={12} xl={12}>
+                      <Form.Select
+                        field='WeChatDefaultLoginMethod'
+                        label={t('默认登录方式')}
+                        placeholder={t('选择默认登录方式')}
+                        optionList={[
+                          { label: t('扫码'), value: 'scan' },
+                          { label: t('验证码'), value: 'code' },
+                        ]}
+                        extraText={t('两种流程同时启用时优先展示的方式')}
+                      />
+                    </Col>
+                  </Row>
+                  <Row
+                    gutter={{ xs: 8, sm: 16, md: 24, lg: 24, xl: 24, xxl: 24 }}
+                  >
+                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                      <Form.InputNumber
+                        field='WeChatScanLoginPollIntervalSeconds'
+                        label={t('轮询间隔（秒）')}
+                        min={1}
+                        step={1}
+                        precision={0}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                      <Form.InputNumber
+                        field='WeChatScanLoginTimeoutSeconds'
+                        label={t('二维码超时（秒）')}
+                        min={1}
+                        step={1}
+                        precision={0}
+                      />
+                    </Col>
+                    <Col xs={24} sm={24} md={8} lg={8} xl={8}>
+                      <Form.InputNumber
+                        field='WeChatScanLoginCreateIntervalSecondsPerIP'
+                        label={t('单 IP 创建间隔（秒）')}
+                        min={0}
+                        step={1}
+                        precision={0}
+                      />
+                    </Col>
+                  </Row>
                   <Button onClick={submitWeChat}>
                     {t('保存 WeChat Server 设置')}
                   </Button>
@@ -1633,6 +1780,11 @@ const SystemSetting = () => {
                     {t('保存 Turnstile 设置')}
                   </Button>
                 </Form.Section>
+              </Card>
+
+              {/* 短信（验证码）设置 — 与 OAuth 配置同处系统设置面板 */}
+              <Card>
+                <SettingsSMS options={inputs} refresh={getOptions} />
               </Card>
 
               <Modal

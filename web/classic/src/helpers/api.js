@@ -24,6 +24,7 @@ import {
   isValidMessage,
 } from './utils';
 import axios from 'axios';
+import i18n from '../i18n/i18n';
 import { MESSAGE_ROLES } from '../constants/playground.constants';
 
 export let API = axios.create({
@@ -256,6 +257,41 @@ export async function getOAuthState() {
   }
 }
 
+// WeChat scan-login: create a login QR code. The optional affiliate code is
+// forwarded so a scan-and-register on the sign-up page keeps the referral.
+export async function createWechatLoginQrcode(affCode) {
+  const body = affCode ? { aff_code: affCode } : {};
+  const res = await API.post('/api/oauth/wechat/login/qrcode', body);
+  return res.data;
+}
+
+// WeChat scan-login: poll the login status for a given login token. While the
+// QR is unscanned the response is { status: 'pending' }; on success it returns
+// the standard login response shape (id / require_2fa).
+export async function getWechatLoginStatus(loginToken) {
+  const res = await API.get('/api/oauth/wechat/login/status', {
+    params: { login_token: loginToken },
+    // Each poll must reach the server; never dedupe/serve a stale promise.
+    disableDuplicate: true,
+  });
+  return res.data;
+}
+
+// WeChat scan-bind: create a QR session for the authenticated user. The
+// successful poll writes the openid onto the user instead of starting a login.
+export async function createWechatBindQrcode() {
+  const res = await API.post('/api/user/wechat/bind/qrcode');
+  return res.data;
+}
+
+export async function getWechatBindStatus(loginToken) {
+  const res = await API.get('/api/user/wechat/bind/status', {
+    params: { login_token: loginToken },
+    disableDuplicate: true,
+  });
+  return res.data;
+}
+
 async function prepareOAuthState(options = {}) {
   const { shouldLogout = false } = options;
   if (shouldLogout) {
@@ -363,7 +399,11 @@ export async function onCustomOAuthClicked(provider, options = {}) {
     redirectToOAuthUrl(authUrl);
   } catch (error) {
     console.error('Failed to initiate custom OAuth:', error);
-    showError('OAuth 登录失败：' + (error.message || '未知错误'));
+    showError(
+      i18n.t('OAuth 登录失败：{{message}}', {
+        message: error.message || i18n.t('未知错误'),
+      }),
+    );
   }
 }
 

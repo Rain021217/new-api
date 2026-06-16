@@ -43,6 +43,7 @@ import PreferencesSettings from './personal/cards/PreferencesSettings';
 import CheckinCalendar from './personal/cards/CheckinCalendar';
 import EmailBindModal from './personal/modals/EmailBindModal';
 import WeChatBindModal from './personal/modals/WeChatBindModal';
+import PhoneBindModal from './personal/modals/PhoneBindModal';
 import AccountDeleteModal from './personal/modals/AccountDeleteModal';
 import ChangePasswordModal from './personal/modals/ChangePasswordModal';
 import SecureVerificationModal from '../common/modals/SecureVerificationModal';
@@ -57,6 +58,8 @@ const PersonalSetting = () => {
     wechat_verification_code: '',
     email_verification_code: '',
     email: '',
+    phone: '',
+    phone_verification_code: '',
     self_account_deletion_confirmation: '',
     original_password: '',
     set_new_password: '',
@@ -66,6 +69,10 @@ const PersonalSetting = () => {
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
   const [showWeChatBindModal, setShowWeChatBindModal] = useState(false);
   const [showEmailBindModal, setShowEmailBindModal] = useState(false);
+  const [showPhoneBindModal, setShowPhoneBindModal] = useState(false);
+  const [phoneDisableButton, setPhoneDisableButton] = useState(false);
+  const [phoneCountdown, setPhoneCountdown] = useState(60);
+  const [phoneLoading, setPhoneLoading] = useState(false);
   const [showAccountDeleteModal, setShowAccountDeleteModal] = useState(false);
   const [turnstileEnabled, setTurnstileEnabled] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState('');
@@ -178,6 +185,19 @@ const PersonalSetting = () => {
     }
     return () => clearInterval(countdownInterval); // Clean up on unmount
   }, [disableButton, countdown]);
+
+  useEffect(() => {
+    let phoneCountdownInterval = null;
+    if (phoneDisableButton && phoneCountdown > 0) {
+      phoneCountdownInterval = setInterval(() => {
+        setPhoneCountdown(phoneCountdown - 1);
+      }, 1000);
+    } else if (phoneCountdown === 0) {
+      setPhoneDisableButton(false);
+      setPhoneCountdown(60);
+    }
+    return () => clearInterval(phoneCountdownInterval);
+  }, [phoneDisableButton, phoneCountdown]);
 
   useEffect(() => {
     if (userState?.user?.setting) {
@@ -486,6 +506,64 @@ const PersonalSetting = () => {
     setLoading(false);
   };
 
+  const sendPhoneVerificationCode = async () => {
+    if (!inputs.phone || inputs.phone.trim().length < 6) {
+      showError(t('请输入手机号'));
+      return;
+    }
+    setPhoneLoading(true);
+    setPhoneDisableButton(true);
+    try {
+      const res = await API.post('/api/user/sms/bind/code', {
+        phone: inputs.phone.trim(),
+      });
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('验证码发送成功，请查收短信'));
+      } else {
+        showError(message);
+        setPhoneDisableButton(false);
+        setPhoneCountdown(60);
+      }
+    } catch (e) {
+      showError(t('发送验证码失败'));
+      setPhoneDisableButton(false);
+      setPhoneCountdown(60);
+    }
+    setPhoneLoading(false);
+  };
+
+  const bindPhone = async () => {
+    if (!inputs.phone || !inputs.phone_verification_code) {
+      showError(t('请输入手机号和验证码'));
+      return;
+    }
+    setPhoneLoading(true);
+    try {
+      const res = await API.post('/api/user/sms/bind', {
+        phone: inputs.phone.trim(),
+        verification_code: inputs.phone_verification_code.trim(),
+      });
+      const { success, message } = res.data;
+      if (success) {
+        showSuccess(t('手机号绑定成功！'));
+        setShowPhoneBindModal(false);
+        setInputs((prev) => ({
+          ...prev,
+          phone: '',
+          phone_verification_code: '',
+        }));
+        // refresh user data so phone_masked appears in the binding row
+        await getUserData();
+      } else {
+        showError(message);
+      }
+    } catch (e) {
+      showError(t('手机号绑定失败'));
+    }
+    setPhoneLoading(false);
+  };
+
   const copyText = async (text) => {
     if (await copy(text)) {
       showSuccess(t('已复制：') + text);
@@ -571,6 +649,7 @@ const PersonalSetting = () => {
                 systemToken={systemToken}
                 setShowEmailBindModal={setShowEmailBindModal}
                 setShowWeChatBindModal={setShowWeChatBindModal}
+                setShowPhoneBindModal={setShowPhoneBindModal}
                 generateAccessToken={generateAccessToken}
                 handleSystemTokenClick={handleSystemTokenClick}
                 setShowChangePasswordModal={setShowChangePasswordModal}
@@ -623,6 +702,19 @@ const PersonalSetting = () => {
         handleInputChange={handleInputChange}
         bindWeChat={bindWeChat}
         status={status}
+      />
+
+      <PhoneBindModal
+        t={t}
+        showPhoneBindModal={showPhoneBindModal}
+        setShowPhoneBindModal={setShowPhoneBindModal}
+        inputs={inputs}
+        handleInputChange={handleInputChange}
+        sendPhoneVerificationCode={sendPhoneVerificationCode}
+        bindPhone={bindPhone}
+        phoneDisableButton={phoneDisableButton}
+        phoneLoading={phoneLoading}
+        phoneCountdown={phoneCountdown}
       />
 
       <AccountDeleteModal

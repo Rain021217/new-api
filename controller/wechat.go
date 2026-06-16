@@ -1,7 +1,6 @@
 package controller
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/QuantumNous/new-api/common"
 	"github.com/QuantumNous/new-api/model"
+	"github.com/QuantumNous/new-api/service"
 
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -40,7 +40,7 @@ func getWeChatIdByCode(code string) (string, error) {
 	}
 	defer httpResponse.Body.Close()
 	var res wechatLoginResponse
-	err = json.NewDecoder(httpResponse.Body).Decode(&res)
+	err = common.DecodeJson(httpResponse.Body, &res)
 	if err != nil {
 		return "", err
 	}
@@ -54,7 +54,7 @@ func getWeChatIdByCode(code string) (string, error) {
 }
 
 func WeChatAuth(c *gin.Context) {
-	if !common.WeChatAuthEnabled {
+	if !common.WeChatAuthEnabled || !common.WeChatCodeLoginEnabled {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "管理员未开启通过微信登录以及注册",
 			"success": false,
@@ -70,56 +70,78 @@ func WeChatAuth(c *gin.Context) {
 		})
 		return
 	}
+	user, err := loginOrCreateUserByWeChatId(wechatId, affiliateInviteCodeFromRequest(c))
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{
+			"success": false,
+			"message": err.Error(),
+		})
+		return
+	}
+	setupLogin(user, c)
+}
+
+// loginOrCreateUserByWeChatId resolves a WeChat openid to a usable account. It is shared
+// by the legacy code login (WeChatAuth) and the scan-login status poll (WX-B-6): an
+// already-bound openid loads the existing user, otherwise — when open registration is on —
+// it provisions wechat_<nextId> and records affiliate invite attribution. The returned
+// error carries a user-facing message; callers map it onto their own response envelope and
+// decide how to start the session (setupLogin vs setupLoginWithOptionalTwoFA).
+func loginOrCreateUserByWeChatId(wechatId string, inviteCode string) (*model.User, error) {
 	user := model.User{
 		WeChatId: wechatId,
 	}
 	if model.IsWeChatIdAlreadyTaken(wechatId) {
-		err := user.FillUserByWeChatId()
-		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": err.Error(),
-			})
-			return
+		if err := user.FillUserByWeChatId(); err != nil {
+			return nil, err
 		}
 		if user.Id == 0 {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "用户已注销",
-			})
-			return
+			return nil, errors.New("用户已注销")
 		}
 	} else {
-		if common.RegisterEnabled {
-			user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
-			user.DisplayName = "WeChat User"
-			user.Role = common.RoleCommonUser
-			user.Status = common.UserStatusEnabled
+		if !common.RegisterEnabled {
+			return nil, errors.New("管理员关闭了新用户注册")
+		}
+		user.Username = "wechat_" + strconv.Itoa(model.GetMaxUserId()+1)
+		user.DisplayName = "WeChat User"
+		user.Role = common.RoleCommonUser
+		user.Status = common.UserStatusEnabled
 
-			if err := user.Insert(0); err != nil {
-				c.JSON(http.StatusOK, gin.H{
-					"success": false,
-					"message": err.Error(),
-				})
-				return
-			}
-		} else {
-			c.JSON(http.StatusOK, gin.H{
-				"success": false,
-				"message": "管理员关闭了新用户注册",
-			})
-			return
+		inviteCtx, err := resolveAffiliateInviteContextForRegistration(model.DB, affiliateRegistrationAttributionInput{
+			InviteCode:     inviteCode,
+			RegisterMethod: service.AffiliateRegisterMethodWeChat,
+			Provider:       "wechat",
+		})
+		if err != nil {
+			return nil, err
+		}
+		inviterId := 0
+		if inviteCtx != nil {
+			inviterId = inviteCtx.InviterUserId
+		}
+
+		// Persist the inviter relation onto the new user row — InsertWithInviteeQuota
+		// only credits quotas via applyInviteRewards and does NOT write the inviter_id
+		// column otherwise (historical bug: rewards went out but user.inviter_id stayed
+		// 0, so the inviter never showed up in 用户管理).
+		user.InviterId = inviterId
+		if err := user.InsertWithInviteeQuota(inviterId, affiliateInviteeQuotaForContext(inviteCtx)); err != nil {
+			return nil, err
+		}
+		if _, err := recordAffiliateInviteAttributionForRegistration(model.DB, inviteCtx, affiliateRegistrationAttributionInput{
+			InviteeUserId:  user.Id,
+			RegisterMethod: service.AffiliateRegisterMethodWeChat,
+			Provider:       "wechat",
+			InitialQuota:   affiliateInviteInitialQuotaForContext(inviteCtx),
+		}); err != nil {
+			return nil, err
 		}
 	}
 
 	if user.Status != common.UserStatusEnabled {
-		c.JSON(http.StatusOK, gin.H{
-			"message": "用户已被封禁",
-			"success": false,
-		})
-		return
+		return nil, errors.New("用户已被封禁")
 	}
-	setupLogin(&user, c)
+	return &user, nil
 }
 
 type wechatBindRequest struct {
@@ -127,7 +149,7 @@ type wechatBindRequest struct {
 }
 
 func WeChatBind(c *gin.Context) {
-	if !common.WeChatAuthEnabled {
+	if !common.WeChatAuthEnabled || !common.WeChatCodeLoginEnabled {
 		c.JSON(http.StatusOK, gin.H{
 			"message": "管理员未开启通过微信登录以及注册",
 			"success": false,

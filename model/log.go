@@ -31,6 +31,16 @@ func applyExplicitLogTextFilter(tx *gorm.DB, column string, value string) (*gorm
 	return tx.Where(column+" = ?", value), nil
 }
 
+func LogGroupColumn() string {
+	if logGroupCol != "" {
+		return logGroupCol
+	}
+	if common.UsingPostgreSQL {
+		return `"group"`
+	}
+	return "`group`"
+}
+
 type Log struct {
 	Id                int    `json:"id" gorm:"index:idx_created_at_id,priority:2;index:idx_user_id_id,priority:2"`
 	UserId            int    `json:"user_id" gorm:"index;index:idx_user_id_id,priority:1"`
@@ -164,6 +174,11 @@ func RecordLoginLog(userId int, username string, content string, ip string, acti
 		Content:   content,
 		Ip:        ip,
 		Other:     common.MapToJsonStr(other),
+	}
+	if LOG_DB == nil {
+		// Tests that exercise the auth handlers in isolation may not seed LOG_DB. Skip
+		// silently rather than panic — the login itself already succeeded.
+		return
 	}
 	if err := LOG_DB.Create(log).Error; err != nil {
 		common.SysLog("failed to record login log: " + err.Error())
@@ -352,6 +367,7 @@ type RecordTaskBillingLogParams struct {
 	Quota     int
 	TokenId   int
 	Group     string
+	RequestId string
 	Other     map[string]interface{}
 }
 
@@ -378,6 +394,7 @@ func RecordTaskBillingLog(params RecordTaskBillingLogParams) {
 		ChannelId: params.ChannelId,
 		TokenId:   params.TokenId,
 		Group:     params.Group,
+		RequestId: params.RequestId,
 		Other:     common.MapToJsonStr(params.Other),
 	}
 	err := LOG_DB.Create(log).Error

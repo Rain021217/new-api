@@ -22,6 +22,8 @@ import {
   CreditCard,
   FileText,
   FlaskConical,
+  Handshake,
+  HandshakeIcon,
   Key,
   LayoutDashboard,
   ListTodo,
@@ -88,6 +90,11 @@ export function useSidebarData(): SidebarData {
             icon: FileText,
           },
           {
+            title: t('Affiliate Center'),
+            url: '/affiliate',
+            icon: Handshake,
+          },
+          {
             title: t('Task Logs'),
             url: '/usage-logs/task',
             activeUrls: ['/usage-logs/drawing'],
@@ -140,6 +147,11 @@ export function useSidebarData(): SidebarData {
             title: t('Subscription Management'),
             url: '/subscriptions',
             icon: CreditCard,
+          },
+          {
+            title: t('Affiliate Management'),
+            url: '/affiliate/admin',
+            icon: HandshakeIcon,
           },
           {
             title: t('System Settings'),

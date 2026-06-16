@@ -66,6 +66,7 @@ var DisplayTokenStatEnabled = true
 var DrawingEnabled = true
 var TaskEnabled = true
 var DataExportEnabled = true
+var AffiliateEnabled = false
 var DataExportInterval = 5         // unit: minute
 var DataExportDefaultTime = "hour" // unit: minute
 var DefaultCollapseSidebar = false // default value of collapse sidebar
@@ -90,6 +91,34 @@ var WeChatAuthEnabled = false
 var TelegramOAuthEnabled = false
 var TurnstileCheckEnabled = false
 var RegisterEnabled = true
+
+var SMSEnabled = false
+
+// SMSLoginEnabled and SMSRegisterEnabled let admins flip the two SMS user flows independently
+// while keeping SMSEnabled as the master switch: either sub-flag is only honored when the
+// master is also true. Both default to true so existing deployments with only SMSEnabled set
+// keep working unchanged.
+var SMSLoginEnabled = true
+var SMSRegisterEnabled = true
+var SMSProviderName = "smsbao"
+var SMSBaoEndpoint = "https://api.smsbao.com/sms"
+var SMSBaoQueryEndpoint = "https://www.smsbao.com/query"
+var SMSBaoUsername = ""
+var SMSBaoCredential = ""
+var SMSBaoCredentialMode = "api_key"
+var SMSBaoProductID = ""
+var SMSCodeValidMinutes = 10
+var SMSCodeCooldownSeconds = 60
+var SMSRateLimitEnabled = false
+var SMSRateLimitWindowSeconds = 60
+var SMSRateLimitPhoneCount = 1
+var SMSRateLimitIPCount = 10
+var SMSRateLimitAccountCount = 5
+var SMSRateLimitSceneCount = 100
+var SMSSignature = ""
+var SMSSignatureReviewStatus = "pending"
+var SMSProductName = ""
+var SMSTemplate = "{product}验证码 {code}，{minutes} 分钟内有效。"
 
 var EmailDomainRestrictionEnabled = false // 是否启用邮箱域名限制
 var EmailAliasRestrictionEnabled = false  // 是否启用邮箱别名限制
@@ -135,6 +164,22 @@ var WeChatServerAddress = ""
 var WeChatServerToken = ""
 var WeChatAccountQRCodeImageURL = ""
 
+// WeChat login duality knobs. The legacy "code login" is the QR-image + verification-code flow
+// rendered behind WeChatAccountQRCodeImageURL; the new "scan login" is the server-mediated
+// scene_id/login_token flow handled by service/wechat_login.go. WeChatAuthEnabled remains the
+// master switch so existing deployments stay backward compatible.
+var WeChatCodeLoginEnabled = true
+var WeChatScanLoginEnabled = true
+var WeChatDefaultLoginMethod = "scan" // "scan" or "code"
+var WeChatScanLoginPollIntervalSeconds = 2
+var WeChatScanLoginTimeoutSeconds = 180
+var WeChatScanLoginMinPollIntervalSeconds = 1
+
+// WeChatScanLoginCreateIntervalSecondsPerIP throttles how often a single client IP may hit the
+// QR-create endpoint. Two seconds is the operationally observed floor that avoids accidental
+// hammering of the external program without surprising legitimate users.
+var WeChatScanLoginCreateIntervalSecondsPerIP = 2
+
 var TurnstileSiteKey = ""
 var TurnstileSecretKey = ""
 
@@ -144,6 +189,11 @@ var TelegramBotName = ""
 var QuotaForNewUser = 0
 var QuotaForInviter = 0
 var QuotaForInvitee = 0
+var AffiliateQuotaForInvitee = -1
+var AffiliateLevelOneQuotaForInvitee = -1
+var AffiliateLevelTwoQuotaForInvitee = -1
+var AffiliateLevelOneQuotaForInviter = -1
+var AffiliateLevelTwoQuotaForInviter = -1
 var ChannelDisableThreshold = 5.0
 var AutomaticDisableChannelEnabled = false
 var AutomaticEnableChannelEnabled = false

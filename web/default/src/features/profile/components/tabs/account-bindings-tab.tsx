@@ -17,7 +17,7 @@ along with this program. If not, see <https://www.gnu.org/licenses/>.
 For commercial licensing, please contact support@quantumnous.com
 */
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { Mail, Shield, Send, Link2, Unlink } from 'lucide-react'
+import { Mail, Shield, Send, Link2, Unlink, Smartphone } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { SiGithub, SiWechat, SiLinux } from 'react-icons/si'
 import { toast } from 'sonner'
@@ -42,6 +42,7 @@ import {
 } from '../../api'
 import type { UserProfile, BindingItem } from '../../types'
 import { EmailBindDialog } from '../dialogs/email-bind-dialog'
+import { PhoneBindDialog } from '../dialogs/phone-bind-dialog'
 import { TelegramBindDialog } from '../dialogs/telegram-bind-dialog'
 import { WeChatBindDialog } from '../dialogs/wechat-bind-dialog'
 
@@ -54,7 +55,7 @@ interface AccountBindingsTabProps {
   onUpdate: () => void
 }
 
-type DialogKey = 'email' | 'wechat' | 'telegram'
+type DialogKey = 'email' | 'phone' | 'wechat' | 'telegram'
 
 export function AccountBindingsTab({
   profile,
@@ -159,6 +160,23 @@ export function AccountBindingsTab({
         isBound: Boolean(profile.email),
         isEnabled: true,
         onBind: () => dialogs.open('email'),
+      },
+      {
+        id: 'phone',
+        label: t('Phone'),
+        icon: Smartphone,
+        value: (profile as unknown as Record<string, unknown>)
+          .phone_masked as string | undefined,
+        isBound: Boolean(
+          (profile as unknown as Record<string, unknown>).phone_masked
+        ),
+        isEnabled: Boolean(
+          (status as unknown as Record<string, unknown>)?.sms_enabled ??
+            status?.sms_login ??
+            status?.sms_register ??
+            false
+        ),
+        onBind: () => dialogs.open('phone'),
       },
       {
         id: 'wechat',
@@ -397,6 +415,20 @@ export function AccountBindingsTab({
           open ? dialogs.open('email') : dialogs.close('email')
         }
         currentEmail={profile.email}
+        onSuccess={onUpdate}
+      />
+
+      {/* Phone Bind Dialog */}
+      <PhoneBindDialog
+        open={dialogs.isOpen('phone')}
+        onOpenChange={(open) =>
+          open ? dialogs.open('phone') : dialogs.close('phone')
+        }
+        currentPhone={
+          (profile as unknown as Record<string, unknown>).phone_masked as
+            | string
+            | undefined
+        }
         onSuccess={onUpdate}
       />
 

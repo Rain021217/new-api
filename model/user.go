@@ -116,6 +116,7 @@ func generateDefaultSidebarConfigForRole(userRole int) string {
 		"detail":     true,
 		"token":      true,
 		"log":        true,
+		"affiliate":  true,
 		"midjourney": true,
 		"task":       true,
 	}
@@ -333,13 +334,17 @@ func HardDeleteUserById(id int) error {
 }
 
 func inviteUser(inviterId int) (err error) {
+	return inviteUserWithQuota(inviterId, common.QuotaForInviter)
+}
+
+func inviteUserWithQuota(inviterId int, inviterQuota int) (err error) {
 	user, err := GetUserById(inviterId, true)
 	if err != nil {
 		return err
 	}
 	user.AffCount++
-	user.AffQuota += common.QuotaForInviter
-	user.AffHistoryQuota += common.QuotaForInviter
+	user.AffQuota += inviterQuota
+	user.AffHistoryQuota += inviterQuota
 	return DB.Save(user).Error
 }
 
@@ -381,6 +386,14 @@ func (user *User) TransferAffQuotaToQuota(quota int) error {
 }
 
 func (user *User) Insert(inviterId int) error {
+	return user.InsertWithInviteeQuota(inviterId, common.QuotaForInvitee)
+}
+
+func (user *User) InsertWithInviteeQuota(inviterId int, inviteeQuota int) error {
+	return user.InsertWithInviteQuotas(inviterId, inviteeQuota, common.QuotaForInviter)
+}
+
+func (user *User) InsertWithInviteQuotas(inviterId int, inviteeQuota int, inviterQuota int) error {
 	var err error
 	if user.Password != "" {
 		user.Password, err = common.Password2Hash(user.Password)
@@ -391,6 +404,12 @@ func (user *User) Insert(inviterId int) error {
 	user.Quota = common.QuotaForNewUser
 	//user.SetAccessToken(common.GetUUID())
 	user.AffCode = common.GetRandomString(4)
+	// Persist the inviter relation on the user row (defense-in-depth: some historical
+	// callers — github/linuxdo/wechat — passed inviterId only to applyInviteRewards
+	// but forgot to set user.InviterId, so rewards went out yet the column stayed 0).
+	if inviterId != 0 {
+		user.InviterId = inviterId
+	}
 
 	// 初始化用户设置，包括默认的边栏配置
 	if user.Setting == "" {
@@ -422,17 +441,7 @@ func (user *User) Insert(inviterId int) error {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
-	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
-		}
-		if common.QuotaForInviter > 0 {
-			//_ = IncreaseUserQuota(inviterId, common.QuotaForInviter)
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
-		}
-	}
+	applyInviteRewards(user.Id, inviterId, inviteeQuota, inviterQuota)
 	return nil
 }
 
@@ -440,6 +449,12 @@ func (user *User) Insert(inviterId int) error {
 // This is used for OAuth registration where user creation and binding need to be atomic.
 // Post-creation tasks (sidebar config, logs, inviter rewards) are handled after the transaction commits.
 func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
+	// Only overwrite user.InviterId when a real inviter was passed. Callers (e.g. the
+	// WeChat scan-bind path) may pre-populate user.InviterId via other means; passing
+	// inviterId=0 here MUST NOT clobber that value back to zero.
+	if inviterId != 0 {
+		user.InviterId = inviterId
+	}
 	var err error
 	if user.Password != "" {
 		user.Password, err = common.Password2Hash(user.Password)
@@ -467,6 +482,14 @@ func (user *User) InsertWithTx(tx *gorm.DB, inviterId int) error {
 // FinalizeOAuthUserCreation performs post-transaction tasks for OAuth user creation.
 // This should be called after the transaction commits successfully.
 func (user *User) FinalizeOAuthUserCreation(inviterId int) {
+	user.FinalizeOAuthUserCreationWithInviteeQuota(inviterId, common.QuotaForInvitee)
+}
+
+func (user *User) FinalizeOAuthUserCreationWithInviteeQuota(inviterId int, inviteeQuota int) {
+	user.FinalizeOAuthUserCreationWithInviteQuotas(inviterId, inviteeQuota, common.QuotaForInviter)
+}
+
+func (user *User) FinalizeOAuthUserCreationWithInviteQuotas(inviterId int, inviteeQuota int, inviterQuota int) {
 	// 用户创建成功后，根据角色初始化边栏配置
 	var createdUser User
 	if err := DB.Where("id = ?", user.Id).First(&createdUser).Error; err == nil {
@@ -483,14 +506,18 @@ func (user *User) FinalizeOAuthUserCreation(inviterId int) {
 	if common.QuotaForNewUser > 0 {
 		RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("新用户注册赠送 %s", logger.LogQuota(common.QuotaForNewUser)))
 	}
+	applyInviteRewards(user.Id, inviterId, inviteeQuota, inviterQuota)
+}
+
+func applyInviteRewards(inviteeId int, inviterId int, inviteeQuota int, inviterQuota int) {
 	if inviterId != 0 && operation_setting.IsPaymentComplianceConfirmed() {
-		if common.QuotaForInvitee > 0 {
-			_ = IncreaseUserQuota(user.Id, common.QuotaForInvitee, true)
-			RecordLog(user.Id, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(common.QuotaForInvitee)))
+		if inviteeQuota > 0 {
+			_ = IncreaseUserQuota(inviteeId, inviteeQuota, true)
+			RecordLog(inviteeId, LogTypeSystem, fmt.Sprintf("使用邀请码赠送 %s", logger.LogQuota(inviteeQuota)))
 		}
-		if common.QuotaForInviter > 0 {
-			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(common.QuotaForInviter)))
-			_ = inviteUser(inviterId)
+		if inviterQuota > 0 {
+			RecordLog(inviterId, LogTypeSystem, fmt.Sprintf("邀请用户赠送 %s", logger.LogQuota(inviterQuota)))
+			_ = inviteUserWithQuota(inviterId, inviterQuota)
 		}
 	}
 }
